@@ -1,11 +1,14 @@
 :root {
-  --paper: #f4efe5;
-  --paper-deep: #e7dcc9;
-  --ink: #1f1a17;
-  --muted: #77695d;
-  --accent: #8f311c;
-  --line: rgba(31, 26, 23, 0.12);
-  --shadow: 0 22px 60px rgba(61, 40, 17, 0.12);
+  --paper: #f3f0ea;
+  --paper-strong: #ece7df;
+  --panel: rgba(250, 248, 244, 0.92);
+  --panel-alt: rgba(245, 242, 236, 0.95);
+  --ink: #121212;
+  --muted: #6a6a6a;
+  --accent: #0f0f0f;
+  --line: rgba(18, 18, 18, 0.14);
+  --line-strong: rgba(18, 18, 18, 0.28);
+  --shadow: 0 24px 80px rgba(18, 18, 18, 0.06);
 }
 
 * {
@@ -17,66 +20,69 @@ body {
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top left, rgba(143, 49, 28, 0.16), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(94, 69, 42, 0.18), transparent 24%),
-    linear-gradient(180deg, #efe7da, #f9f6f0 58%, #ede4d6);
+    linear-gradient(90deg, rgba(18, 18, 18, 0.04) 0, rgba(18, 18, 18, 0.04) 1px, transparent 1px, transparent 64px),
+    linear-gradient(180deg, rgba(18, 18, 18, 0.035) 0, rgba(18, 18, 18, 0.035) 1px, transparent 1px, transparent 64px),
+    linear-gradient(180deg, #f7f5f1, #efebe4);
   color: var(--ink);
-  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
 }
 
 body {
-  padding: 24px;
+  padding: 20px;
 }
 
 .shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
-  min-height: calc(100vh - 48px);
+  gap: 0;
+  min-height: calc(100vh - 40px);
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: var(--shadow);
 }
 
 .panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.52);
-  border-radius: 28px;
-  background: rgba(255, 250, 243, 0.78);
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow);
+  padding: 28px 30px 30px;
+  background: var(--panel);
 }
 
 .panel-editor {
-  background:
-    linear-gradient(180deg, rgba(255, 252, 247, 0.92), rgba(245, 235, 220, 0.82)),
-    repeating-linear-gradient(
-      180deg,
-      transparent,
-      transparent 34px,
-      rgba(143, 49, 28, 0.05) 34px,
-      rgba(143, 49, 28, 0.05) 35px
-    );
+  border-right: 1px solid var(--line-strong);
 }
 
 .panel-archive {
-  background: linear-gradient(180deg, rgba(255, 251, 245, 0.82), rgba(233, 222, 206, 0.92));
+  background: var(--panel-alt);
 }
 
 .panel-header,
 .matches-header {
   display: flex;
-  align-items: end;
+  align-items: start;
   justify-content: space-between;
   gap: 16px;
 }
 
+.panel-heading {
+  display: grid;
+  gap: 6px;
+}
+
 .eyebrow {
-  margin: 0 0 6px;
-  font-family: "Gill Sans", "Trebuchet MS", sans-serif;
+  margin: 0;
   font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.panel-deck {
+  margin: 0;
+  max-width: 28ch;
+  font-size: 0.88rem;
+  line-height: 1.45;
   color: var(--muted);
 }
 
@@ -90,15 +96,16 @@ p {
 h1,
 h2 {
   margin-bottom: 0;
-  font-size: clamp(1.7rem, 2vw, 2.3rem);
-  font-weight: 400;
+  font-size: clamp(1.6rem, 1.9vw, 2.05rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
 
 h3 {
   margin-bottom: 0;
-  font-size: 0.95rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   color: var(--muted);
 }
 
@@ -108,32 +115,34 @@ h3 {
 .match-meta,
 .citation,
 .notes {
-  font-family: "Gill Sans", "Trebuchet MS", sans-serif;
+  font-family: inherit;
 }
 
 .intro {
-  margin: 18px 0 22px;
-  max-width: 60ch;
-  line-height: 1.5;
-  color: #564a41;
+  margin: 20px 0 22px;
+  max-width: 38ch;
+  line-height: 1.55;
+  color: #474747;
 }
 
 .style-picker {
   display: grid;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   color: var(--muted);
 }
 
 .style-picker select {
   padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.9);
   color: var(--ink);
   font: inherit;
+  min-width: 132px;
+  appearance: none;
 }
 
 textarea {
@@ -145,8 +154,10 @@ textarea {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: clamp(1.2rem, 1.65vw, 1.6rem);
-  line-height: 1.9;
+  font-size: clamp(1.18rem, 1.45vw, 1.5rem);
+  line-height: 1.72;
+  letter-spacing: -0.01em;
+  padding-top: 10px;
 }
 
 .quotation-output,
@@ -155,9 +166,11 @@ textarea {
 }
 
 .quotation-output {
-  padding: 18px 0 8px;
-  font-size: 1.12rem;
-  line-height: 1.75;
+  padding: 20px 0 12px;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-size: 1.06rem;
+  line-height: 1.8;
+  border-top: 1px solid var(--line);
 }
 
 .quotation-output p {
@@ -166,16 +179,25 @@ textarea {
 
 .quote-mark {
   color: var(--accent);
-  font-size: 1.45em;
+  font-size: 1.25em;
   line-height: 0;
-  vertical-align: -0.18em;
+  vertical-align: -0.08em;
 }
 
 .citation,
 .stats,
 .match-meta {
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stats {
+  margin: 0;
+  max-width: 18ch;
+  text-align: right;
+  line-height: 1.5;
 }
 
 .matches {
@@ -187,21 +209,21 @@ textarea {
 
 .matches-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
   padding-top: 12px;
 }
 
 .match-card {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.42);
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
 }
 
 .match-card h4 {
   margin: 0 0 8px;
   font-size: 1rem;
-  font-weight: 400;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 .match-card p {
@@ -210,6 +232,7 @@ textarea {
 
 .match-card a {
   color: var(--accent);
+  text-underline-offset: 0.18em;
   text-decoration-thickness: 1px;
 }
 
@@ -241,5 +264,20 @@ sup {
   .panel {
     min-height: 48vh;
     padding: 22px;
+  }
+
+  .panel-editor {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .panel-header {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .stats {
+    max-width: none;
+    text-align: left;
   }
 }

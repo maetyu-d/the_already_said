@@ -35,7 +35,7 @@ Then open `http://127.0.0.1:8000`.
 python3 desktop_app.py
 ```
 
-This launches a native macOS window with the draft on the left and the quotation rewrite on the right, without needing a browser tab.
+This launches a native macOS window with the draft on the left and the quotation rewrite on the right, without needing a browser tab. In development it will use `data/gutenberg.db` automatically when present.
 
 ## Corpus format
 
@@ -154,7 +154,7 @@ The repo includes a PyInstaller spec for a macOS `.app` bundle:
 python3 -m PyInstaller AlreadySaid.spec
 ```
 
-That produces a desktop app bundle in `dist/` which ships with the indexed SQLite data directory.
+That produces a lightweight desktop app bundle in `dist/` with the UI assets only. The standalone app expects the large Gutenberg index to live outside the `.app`, and on first launch it will ask you to choose your external `gutenberg.db` file if it cannot find a saved location.
 
 ## Repo and release scope
 
@@ -163,6 +163,7 @@ The Git repository and lightweight release zip are intended to contain the app, 
 - The full downloaded Gutenberg archive is not committed.
 - The extracted full-text corpus is not committed.
 - The large SQLite search index is not committed.
+- The packaged `.app` is intentionally kept separate from the large local database.
 
 If you want to distribute the full corpus separately, host the archive or index outside the repo and point users at the ingest workflow.
 

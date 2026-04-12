@@ -6,7 +6,6 @@ from pathlib import Path
 root = Path.cwd()
 
 datas = [
-    (str(root / "data"), "data"),
     (str(root / "static"), "static"),
 ]
 

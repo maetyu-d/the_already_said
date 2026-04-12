@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -13,7 +14,11 @@ if getattr(sys, "frozen", False):
     ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 else:
     ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "data" / "gutenberg.db"
+ENV_DB_PATH = "ALREADY_SAID_DB_PATH"
+APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "The Already Said"
+CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
+DEV_DB_PATH = Path(__file__).resolve().parent / "data" / "gutenberg.db"
+BUNDLED_DB_PATH = ROOT / "data" / "gutenberg.db"
 
 WORD_RE = re.compile(r"[a-zA-Z']+")
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
@@ -53,6 +58,29 @@ class SearchResult:
     source_url: str
     text: str
     score: float
+
+
+def resolve_db_path(db_path: Path | None = None) -> Path:
+    if db_path is not None:
+        return Path(db_path)
+
+    env_value = os.environ.get(ENV_DB_PATH)
+    if env_value:
+        return Path(env_value).expanduser()
+
+    if CONFIG_PATH.exists():
+        try:
+            payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        configured = payload.get("db_path")
+        if configured:
+            return Path(configured).expanduser()
+
+    if DEV_DB_PATH.exists():
+        return DEV_DB_PATH
+
+    return BUNDLED_DB_PATH
 
 
 def tokenize(text: str) -> list[str]:
@@ -132,7 +160,8 @@ def source_preference(result: SearchResult, query_text: str) -> float:
     return score
 
 
-def fetch_results(query: str, limit: int = 8, db_path: Path = DB_PATH) -> list[SearchResult]:
+def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> list[SearchResult]:
+    db_path = resolve_db_path(db_path)
     if not db_path.exists():
         return []
 
@@ -233,7 +262,8 @@ def extract_inner_quote(text: str) -> str | None:
     return match.group(1).strip()
 
 
-def refine_primary_source(segment: str, quote: str, result: SearchResult, db_path: Path) -> tuple[str, SearchResult]:
+def refine_primary_source(segment: str, quote: str, result: SearchResult, db_path: Path | None) -> tuple[str, SearchResult]:
+    db_path = resolve_db_path(db_path)
     inner = extract_inner_quote(quote)
     if not inner:
         return quote, result
@@ -270,7 +300,8 @@ def oxford_note(result: SearchResult, index: int) -> tuple[str, str]:
     return marker, note
 
 
-def compose_quotation_text(text: str, style: str, db_path: Path = DB_PATH) -> dict:
+def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -> dict:
+    db_path = resolve_db_path(db_path)
     segments = split_sentences(text)
     if not segments:
         return {
@@ -327,7 +358,8 @@ def compose_quotation_text(text: str, style: str, db_path: Path = DB_PATH) -> di
     return {"html": "".join(fragments), "matches": matches, "notes": notes}
 
 
-def compose_plaintext(text: str, style: str, db_path: Path = DB_PATH) -> dict:
+def compose_plaintext(text: str, style: str, db_path: Path | None = None) -> dict:
+    db_path = resolve_db_path(db_path)
     payload = compose_quotation_text(text, style, db_path=db_path)
     blocks: list[str] = []
     for match_index, match in enumerate(payload["matches"], start=1):
@@ -356,7 +388,8 @@ def compose_plaintext(text: str, style: str, db_path: Path = DB_PATH) -> dict:
     return {"text": "\n\n".join(blocks + (["\nNotes\n" + "\n".join(notes)] if notes else [])), "matches": payload["matches"]}
 
 
-def stats(db_path: Path = DB_PATH) -> dict:
+def stats(db_path: Path | None = None) -> dict:
+    db_path = resolve_db_path(db_path)
     if not db_path.exists():
         return {"indexed_passages": 0, "indexed_books": 0}
 
@@ -369,6 +402,7 @@ def stats(db_path: Path = DB_PATH) -> dict:
     return {"indexed_passages": passages, "indexed_books": books}
 
 
-def export_matches_json(text: str, style: str, db_path: Path = DB_PATH) -> str:
+def export_matches_json(text: str, style: str, db_path: Path | None = None) -> str:
+    db_path = resolve_db_path(db_path)
     payload = compose_quotation_text(text, style, db_path=db_path)
     return json.dumps(payload, indent=2)

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import os
 import threading
+from pathlib import Path
 
 import objc
 from AppKit import (
@@ -13,6 +16,10 @@ from AppKit import (
     NSMakeSize,
     NSMenu,
     NSMenuItem,
+    NSOpenPanel,
+    NSAlert,
+    NSAlertStyleCritical,
+    NSModalResponseOK,
     NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskMiniaturizable,
@@ -24,6 +31,7 @@ from PyObjCTools import AppHelper
 from WebKit import WKWebView
 
 from app import make_server
+from engine import APP_SUPPORT_DIR, CONFIG_PATH, DEV_DB_PATH, ENV_DB_PATH
 
 
 class AlreadySaidAppDelegate(NSObject):
@@ -31,6 +39,10 @@ class AlreadySaidAppDelegate(NSObject):
         self = objc.super(AlreadySaidAppDelegate, self).init()
         if self is None:
             return None
+        db_path = ensure_external_db_path()
+        if db_path is None:
+            return None
+        os.environ[ENV_DB_PATH] = str(db_path)
         self.server = make_server(host="127.0.0.1", port=0)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.window = None
@@ -100,11 +112,76 @@ def build_menu() -> None:
     NSApp.setMainMenu_(menubar)
 
 
+def read_saved_db_path() -> Path | None:
+    if not CONFIG_PATH.exists():
+        return None
+    try:
+        payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    raw_path = payload.get("db_path")
+    if not raw_path:
+        return None
+    path = Path(raw_path).expanduser()
+    if path.exists():
+        return path
+    return None
+
+
+def save_db_path(db_path: Path) -> None:
+    APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps({"db_path": str(db_path)}, indent=2), encoding="utf-8")
+
+
+def prompt_for_db_path() -> Path | None:
+    panel = NSOpenPanel.openPanel()
+    panel.setCanChooseFiles_(True)
+    panel.setCanChooseDirectories_(False)
+    panel.setAllowsMultipleSelection_(False)
+    panel.setAllowedFileTypes_(["db"])
+    panel.setTitle_("Choose your Gutenberg index")
+    panel.setMessage_("Select the external gutenberg.db file to use with The Already Said.")
+    response = panel.runModal()
+    if response != NSModalResponseOK:
+        return None
+    url = panel.URL()
+    if url is None:
+        return None
+    return Path(str(url.path()))
+
+
+def show_missing_db_alert() -> None:
+    alert = NSAlert.alloc().init()
+    alert.setAlertStyle_(NSAlertStyleCritical)
+    alert.setMessageText_("Gutenberg index not found")
+    alert.setInformativeText_(
+        "The standalone app now expects an external gutenberg.db file. Choose your existing index when prompted."
+    )
+    alert.runModal()
+
+
+def ensure_external_db_path() -> Path | None:
+    saved = read_saved_db_path()
+    if saved is not None:
+        return saved
+    if DEV_DB_PATH.exists():
+        save_db_path(DEV_DB_PATH)
+        return DEV_DB_PATH
+    show_missing_db_alert()
+    selected = prompt_for_db_path()
+    if selected is None or not selected.exists():
+        return None
+    save_db_path(selected)
+    return selected
+
+
 def main() -> None:
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
     build_menu()
     delegate = AlreadySaidAppDelegate.alloc().init()
+    if delegate is None:
+        return
     app.setDelegate_(delegate)
     AppHelper.runEventLoop()
 
