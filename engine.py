@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 from html import escape
@@ -57,6 +58,9 @@ STOPWORDS = {
     "when", "where", "which", "while", "with", "would", "your", "wife", "man",
     "single", "have", "just", "been", "well", "into", "part",
 }
+PRIMARY_QUERY_TIMEOUT_SECONDS = 6.0
+FALLBACK_AFTER_SECONDS = 150.0
+SQLITE_PROGRESS_STEPS = 20_000
 
 
 @dataclass
@@ -112,16 +116,16 @@ def keyword_candidates(text: str, max_terms: int = 8) -> list[str]:
 
 def phrase_candidates(text: str) -> list[str]:
     tokens = tokenize(text)
-    if len(tokens) < 4:
+    if len(tokens) < 2:
         return []
 
     phrases: list[str] = []
     max_window = min(8, len(tokens))
-    min_window = min(4, max_window)
+    min_window = 2 if len(tokens) <= 3 else min(4, max_window)
     for window in range(max_window, min_window - 1, -1):
         for start in range(0, len(tokens) - window + 1):
             phrase = " ".join(tokens[start : start + window])
-            if len(set(tokens[start : start + window])) < max(3, window - 1):
+            if len(set(tokens[start : start + window])) < max(2, window - 1):
                 continue
             if phrase not in phrases:
                 phrases.append(phrase)
@@ -131,12 +135,21 @@ def phrase_candidates(text: str) -> list[str]:
 
 
 def query_candidates(text: str) -> list[str]:
+    tokens = tokenize(text)
     keywords = keyword_candidates(text)
     phrases = phrase_candidates(text)
-    if not keywords and not phrases:
+    if not keywords and not phrases and not tokens:
         return []
 
-    queries: list[str] = list(phrases)
+    queries: list[str] = []
+    if len(tokens) >= 2:
+        queries.append(f'"{" ".join(tokens)}"')
+    queries.extend(phrases)
+    if len(tokens) == 1:
+        queries.append(tokens[0])
+        queries.append(f"{tokens[0]}*")
+    elif len(tokens) <= 3:
+        queries.append(" AND ".join(tokens))
     if len(keywords) >= 4:
         queries.append(" AND ".join(keywords[:4]))
     if len(keywords) >= 3:
@@ -176,6 +189,119 @@ def source_preference(result: SearchResult, query_text: str) -> float:
     return score
 
 
+def connect_db(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA mmap_size=268435456")
+    return conn
+
+
+def execute_with_timeout(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple,
+    timeout_seconds: float,
+) -> list[sqlite3.Row]:
+    deadline = time.monotonic() + timeout_seconds
+
+    def progress_handler() -> int:
+        return 1 if time.monotonic() > deadline else 0
+
+    conn.set_progress_handler(progress_handler, SQLITE_PROGRESS_STEPS)
+    try:
+        return conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError as error:
+        if "interrupted" in str(error).lower():
+            return []
+        raise
+    finally:
+        conn.set_progress_handler(None, 0)
+
+
+def rerank_result(query: str, result: SearchResult) -> float:
+    return (
+        sentence_score(query, result.text[:2200])
+        + exact_phrase_score(query, result.text[:2200])
+        + sequence_score(query, result.text[:2200])
+        + source_preference(result, query)
+        + max(0.0, 0.05 - result.score)
+    )
+
+
+def collect_scored_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    candidates: list[str],
+    timeout_seconds: float,
+    row_limit: int,
+) -> dict[tuple[str, str, str, str, str], SearchResult]:
+    scored_rows: dict[tuple[str, str, str, str, str], SearchResult] = {}
+    for candidate in candidates:
+        rows = execute_with_timeout(
+            conn,
+            """
+            SELECT
+                passages.title,
+                passages.author,
+                passages.year,
+                passages.source_url,
+                passages.text,
+                bm25(passages_fts, 1.0, 0.3) AS score
+            FROM passages_fts
+            JOIN passages ON passages_fts.rowid = passages.id
+            WHERE passages_fts MATCH ?
+            ORDER BY score
+            LIMIT ?
+            """,
+            (candidate, row_limit),
+            timeout_seconds,
+        )
+        for row in rows:
+            result = SearchResult(
+                title=row["title"],
+                author=row["author"],
+                year=row["year"],
+                source_url=row["source_url"],
+                text=row["text"],
+                score=row["score"],
+            )
+            key = (result.title, result.author, result.year, result.source_url, result.text)
+            reranked = rerank_result(query, result)
+            existing = scored_rows.get(key)
+            if existing is None or reranked > existing.score:
+                result.score = reranked
+                scored_rows[key] = result
+    return scored_rows
+
+
+def fallback_keyword_candidates(text: str) -> list[str]:
+    tokens = tokenize(text)
+    keywords = keyword_candidates(text, max_terms=5)
+    candidates: list[str] = []
+    for token in keywords[:3]:
+        candidates.append(token)
+        candidates.append(f"{token}*")
+    if len(tokens) >= 2:
+        candidates.append(" OR ".join(tokens[: min(4, len(tokens))]))
+    return [candidate for index, candidate in enumerate(candidates) if candidate and candidate not in candidates[:index]]
+
+
+def fallback_fetch_results(query: str, conn: sqlite3.Connection, limit: int = 8) -> list[SearchResult]:
+    candidates = fallback_keyword_candidates(query)
+    if not candidates:
+        return []
+
+    scored_rows = collect_scored_rows(
+        conn,
+        query,
+        candidates,
+        timeout_seconds=PRIMARY_QUERY_TIMEOUT_SECONDS / 2,
+        row_limit=40,
+    )
+    return sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)[:limit]
+
+
 def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> list[SearchResult]:
     db_path = resolve_db_path(db_path)
     if not db_path.exists():
@@ -185,48 +311,22 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
     if not candidates:
         return []
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    started = time.monotonic()
+    conn = connect_db(db_path)
     try:
-        scored_rows: dict[tuple[str, str, str, str, str], SearchResult] = {}
-        for candidate in candidates[:3]:
-            rows = conn.execute(
-                """
-                SELECT
-                    passages.title,
-                    passages.author,
-                    passages.year,
-                    passages.source_url,
-                    passages.text,
-                    bm25(passages_fts, 1.0, 0.3) AS score
-                FROM passages_fts
-                JOIN passages ON passages_fts.rowid = passages.id
-                WHERE passages_fts MATCH ?
-                ORDER BY score
-                LIMIT 12
-                """,
-                (candidate,),
-            ).fetchall()
-            for row in rows:
-                result = SearchResult(
-                    title=row["title"],
-                    author=row["author"],
-                    year=row["year"],
-                    source_url=row["source_url"],
-                    text=row["text"],
-                    score=row["score"],
-                )
+        scored_rows = collect_scored_rows(
+            conn,
+            query,
+            candidates[:3],
+            timeout_seconds=PRIMARY_QUERY_TIMEOUT_SECONDS,
+            row_limit=12,
+        )
+        if not scored_rows or len(tokenize(query)) <= 3 or (time.monotonic() - started) >= FALLBACK_AFTER_SECONDS:
+            fallback_results = fallback_fetch_results(query, conn, limit=limit)
+            for result in fallback_results:
                 key = (result.title, result.author, result.year, result.source_url, result.text)
-                reranked = (
-                    sentence_score(query, result.text[:2200])
-                    + exact_phrase_score(query, result.text[:2200])
-                    + sequence_score(query, result.text[:2200])
-                    + source_preference(result, query)
-                    + max(0.0, 0.05 - result.score)
-                )
                 existing = scored_rows.get(key)
-                if existing is None or reranked > existing.score:
-                    result.score = reranked
+                if existing is None or result.score > existing.score:
                     scored_rows[key] = result
     finally:
         conn.close()
