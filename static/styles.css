@@ -85,6 +85,12 @@ body {
   gap: 12px;
 }
 
+.controls {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .panel-heading {
   display: grid;
   gap: 4px;
@@ -161,6 +167,31 @@ h3 {
   font: inherit;
   min-width: 104px;
   appearance: none;
+}
+
+.file-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.file-actions button {
+  min-width: 50px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.54rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.file-actions button:hover,
+.file-actions button:focus-visible {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: none;
 }
 
 .panel-rule {
@@ -321,6 +352,10 @@ sup {
   .panel-header {
     flex-direction: column;
     align-items: start;
+  }
+
+  .controls {
+    justify-items: start;
   }
 
   .stats {
