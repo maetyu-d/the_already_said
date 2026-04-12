@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The Already Said</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel panel-editor">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Draft</p>
+            <h1>The Already Said</h1>
+          </div>
+          <label class="style-picker">
+            <span>References</span>
+            <select id="citation-style">
+              <option value="harvard">Harvard</option>
+              <option value="oxford">Oxford</option>
+            </select>
+          </label>
+        </div>
+        <p class="intro">
+          Write on the left. The archive on the right reconstitutes your draft entirely from quotations already lodged in Project Gutenberg.
+        </p>
+        <textarea id="editor" spellcheck="false" placeholder="Begin with a thought, a confession, an argument. The library will answer by proving it has all been said before."></textarea>
+      </section>
+
+      <section class="panel panel-archive">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Archive</p>
+            <h2>Quotation Version</h2>
+          </div>
+          <p class="stats" id="stats">Index loading...</p>
+        </div>
+        <article class="quotation-output" id="quotation-output">
+          <p class="empty">Start writing on the left. Quotations will gather here.</p>
+        </article>
+        <section class="matches">
+          <div class="matches-header">
+            <h3>Source Matches</h3>
+          </div>
+          <div id="matches-list" class="matches-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
