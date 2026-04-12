@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -38,6 +39,14 @@ COMMENTARY_TITLE_HINTS = (
     "introduction",
     "criticism",
     "linked index",
+    "anthology",
+    "dictionary",
+    "reference",
+    "manual",
+    "encyclopedia",
+    "collection",
+    "miscellany",
+    "needlecraft",
 )
 STOPWORDS = {
     "about", "after", "again", "against", "almost", "also", "among", "because", "been", "before",
@@ -85,6 +94,10 @@ def resolve_db_path(db_path: Path | None = None) -> Path:
 
 def tokenize(text: str) -> list[str]:
     return [word.lower() for word in WORD_RE.findall(text)]
+
+
+def normalized_text(text: str) -> str:
+    return " ".join(tokenize(text))
 
 
 def keyword_candidates(text: str, max_terms: int = 8) -> list[str]:
@@ -146,17 +159,20 @@ def split_sentences(text: str) -> list[str]:
 def source_preference(result: SearchResult, query_text: str) -> float:
     title = (result.title or "").lower()
     author = (result.author or "").lower()
+    source_url = (result.source_url or "").lower()
     score = 0.0
     if any(hint in title for hint in COMMENTARY_TITLE_HINTS):
-        score -= 1.25
+        score -= 1.75
     if "[editor]" in author or "[translator]" in author:
         score -= 0.35
-    if len(title) < 40:
-        score += 0.2
+    if len(title) < 36:
+        score += 0.25
     if "\n" in result.title:
         score -= 0.25
-    if query_text.lower() in result.text.lower():
-        score += 2.0
+    if normalized_text(query_text) in normalized_text(result.text):
+        score += 2.5
+    if "/ebooks/" in source_url:
+        score += 0.15
     return score
 
 
@@ -173,7 +189,7 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
     conn.row_factory = sqlite3.Row
     try:
         scored_rows: dict[tuple[str, str, str, str, str], SearchResult] = {}
-        for candidate in candidates:
+        for candidate in candidates[:3]:
             rows = conn.execute(
                 """
                 SELECT
@@ -203,6 +219,8 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
                 key = (result.title, result.author, result.year, result.source_url, result.text)
                 reranked = (
                     sentence_score(query, result.text[:2200])
+                    + exact_phrase_score(query, result.text[:2200])
+                    + sequence_score(query, result.text[:2200])
                     + source_preference(result, query)
                     + max(0.0, 0.05 - result.score)
                 )
@@ -210,8 +228,6 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
                 if existing is None or reranked > existing.score:
                     result.score = reranked
                     scored_rows[key] = result
-            if scored_rows:
-                break
     finally:
         conn.close()
 
@@ -230,24 +246,52 @@ def sentence_score(segment: str, candidate: str) -> float:
     return coverage * 2 + density
 
 
+def exact_phrase_score(segment: str, candidate: str) -> float:
+    normalized_segment = normalized_text(segment)
+    normalized_candidate = normalized_text(candidate)
+    if not normalized_segment or not normalized_candidate:
+        return 0.0
+    if normalized_segment in normalized_candidate:
+        return 3.0
+
+    phrases = [phrase.strip('"') for phrase in phrase_candidates(segment)]
+    for phrase in phrases:
+        if phrase and phrase in normalized_candidate:
+            return 1.6
+    return 0.0
+
+
+def sequence_score(segment: str, candidate: str) -> float:
+    normalized_segment = normalized_text(segment)
+    normalized_candidate = normalized_text(candidate)
+    if not normalized_segment or not normalized_candidate:
+        return 0.0
+    return SequenceMatcher(None, normalized_segment, normalized_candidate).ratio()
+
+
 def best_quote(segment: str, result: SearchResult) -> str:
     sentences = split_sentences(result.text)
     if not sentences:
         return result.text.strip()
 
-    scored = sorted(
-        ((sentence_score(segment, sentence), sentence) for sentence in sentences),
-        key=lambda item: item[0],
-        reverse=True,
-    )
-    top_score, top_sentence = scored[0]
-    if top_score <= 0:
+    best_window_score = -1.0
+    best_window_text = ""
+    max_window = min(3, len(sentences))
+    for window in range(1, max_window + 1):
+        for start in range(0, len(sentences) - window + 1):
+            passage = " ".join(sentence.strip() for sentence in sentences[start : start + window]).strip()
+            score = (
+                sentence_score(segment, passage)
+                + exact_phrase_score(segment, passage)
+                + sequence_score(segment, passage)
+            )
+            if score > best_window_score:
+                best_window_score = score
+                best_window_text = passage
+
+    if best_window_score <= 0:
         return sentences[0].strip()
-
-    if len(scored) > 1 and scored[1][0] > top_score * 0.6:
-        return clean_quote_text(f"{top_sentence.strip()} {scored[1][1].strip()}".strip())
-
-    return clean_quote_text(top_sentence.strip())
+    return clean_quote_text(best_window_text)
 
 
 def clean_quote_text(text: str) -> str:
