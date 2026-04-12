@@ -3,8 +3,61 @@ const output = document.getElementById("quotation-output");
 const matchesList = document.getElementById("matches-list");
 const stats = document.getElementById("stats");
 const citationStyle = document.getElementById("citation-style");
+const shell = document.getElementById("shell");
+const splitter = document.getElementById("splitter");
 
 let composeTimer = null;
+let splitRatio = 0.56;
+const splitStorageKey = "the-already-said.split-ratio";
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function applySplitRatio(ratio) {
+  splitRatio = clamp(ratio, 0.3, 0.7);
+  shell.style.gridTemplateColumns = `minmax(320px, ${splitRatio}fr) 12px minmax(280px, ${1 - splitRatio}fr)`;
+}
+
+function loadSplitRatio() {
+  const savedRatio = Number.parseFloat(window.localStorage.getItem(splitStorageKey) || "");
+  if (!Number.isNaN(savedRatio)) {
+    applySplitRatio(savedRatio);
+  }
+}
+
+function saveSplitRatio() {
+  window.localStorage.setItem(splitStorageKey, String(splitRatio));
+}
+
+function onSplitDrag(event) {
+  if (window.innerWidth <= 980) {
+    return;
+  }
+  const bounds = shell.getBoundingClientRect();
+  const ratio = (event.clientX - bounds.left) / bounds.width;
+  applySplitRatio(ratio);
+}
+
+function beginSplitDrag(event) {
+  event.preventDefault();
+  shell.classList.add("is-dragging");
+  onSplitDrag(event);
+
+  function handleMove(moveEvent) {
+    onSplitDrag(moveEvent);
+  }
+
+  function handleUp() {
+    shell.classList.remove("is-dragging");
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleUp);
+    saveSplitRatio();
+  }
+
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleUp);
+}
 
 function escapeHtml(value) {
   return value
@@ -18,7 +71,7 @@ async function loadStats() {
   const payload = await response.json();
   const books = payload.indexed_books.toLocaleString();
   const passages = payload.indexed_passages.toLocaleString();
-  stats.textContent = `${books} books indexed, ${passages} passages ready`;
+  stats.textContent = `${books} books\n${passages} passages`;
 }
 
 function renderMatches(matches) {
@@ -66,9 +119,11 @@ function scheduleCompose() {
 
 editor.addEventListener("input", scheduleCompose);
 citationStyle.addEventListener("change", compose);
+splitter.addEventListener("pointerdown", beginSplitDrag);
 
 loadStats().catch(() => {
   stats.textContent = "Index unavailable";
 });
 
+loadSplitRatio();
 renderMatches([]);

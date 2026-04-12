@@ -7,13 +7,13 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main class="shell">
+    <main class="shell" id="shell">
       <section class="panel panel-editor">
         <div class="panel-header">
           <div class="panel-heading">
-            <p class="eyebrow">01 Draft</p>
+            <p class="eyebrow">TAS / 01</p>
             <h1>The Already Said</h1>
-            <p class="panel-deck">Write plainly. Watch the archive answer.</p>
+            <p class="panel-deck">Draft input</p>
           </div>
           <label class="style-picker">
             <span>References</span>
@@ -23,21 +23,25 @@
             </select>
           </label>
         </div>
-        <p class="intro">
-          The left side is for composition. The right side returns only what has already been said.
-        </p>
-        <textarea id="editor" spellcheck="false" placeholder="Begin with a thought, a confession, an argument. The library will answer by proving it has all been said before."></textarea>
+        <div class="panel-rule" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false" placeholder="Write."></textarea>
+        <div class="panel-footer">
+          <p class="footer-label">Local text field</p>
+        </div>
       </section>
+
+      <div class="splitter" id="splitter" aria-hidden="true"></div>
 
       <section class="panel panel-archive">
         <div class="panel-header">
           <div class="panel-heading">
-            <p class="eyebrow">02 Archive</p>
+            <p class="eyebrow">TAS / 02</p>
             <h2>Quotation Version</h2>
-            <p class="panel-deck">A recomposition from the local Gutenberg index.</p>
+            <p class="panel-deck">Archive output</p>
           </div>
           <p class="stats" id="stats">Index loading...</p>
         </div>
+        <div class="panel-rule" aria-hidden="true"></div>
         <article class="quotation-output" id="quotation-output">
           <p class="empty">Start writing on the left. Quotations will gather here.</p>
         </article>
@@ -47,6 +51,9 @@
           </div>
           <div id="matches-list" class="matches-list"></div>
         </section>
+        <div class="panel-footer">
+          <p class="footer-label">Indexed local archive</p>
+        </div>
       </section>
     </main>
 
