@@ -5,12 +5,9 @@ const stats = document.getElementById("stats");
 const citationStyle = document.getElementById("citation-style");
 const shell = document.getElementById("shell");
 const splitter = document.getElementById("splitter");
-const loadFileButton = document.getElementById("load-file");
-const saveFileButton = document.getElementById("save-file");
-const fileInput = document.getElementById("file-input");
 
 let composeTimer = null;
-let splitRatio = 0.56;
+let splitRatio = 0.5;
 const splitStorageKey = "the-already-said.split-ratio";
 
 function clamp(value, min, max) {
@@ -19,7 +16,7 @@ function clamp(value, min, max) {
 
 function applySplitRatio(ratio) {
   splitRatio = clamp(ratio, 0.3, 0.7);
-  shell.style.gridTemplateColumns = `minmax(320px, ${splitRatio}fr) 12px minmax(280px, ${1 - splitRatio}fr)`;
+  shell.style.gridTemplateColumns = `minmax(320px, ${splitRatio}fr) 12px minmax(320px, ${1 - splitRatio}fr)`;
 }
 
 function loadSplitRatio() {
@@ -120,36 +117,18 @@ function scheduleCompose() {
   composeTimer = setTimeout(compose, 220);
 }
 
-async function loadSelectedFile(event) {
-  const [file] = event.target.files || [];
-  if (!file) {
-    return;
-  }
-  const text = await file.text();
+function setDraftText(text) {
   editor.value = text;
   scheduleCompose();
-  event.target.value = "";
 }
 
-function saveCurrentText() {
-  const text = editor.value;
-  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "the-already-said.txt";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function getDraftText() {
+  return editor.value;
 }
 
 editor.addEventListener("input", scheduleCompose);
 citationStyle.addEventListener("change", compose);
 splitter.addEventListener("pointerdown", beginSplitDrag);
-loadFileButton.addEventListener("click", () => fileInput.click());
-saveFileButton.addEventListener("click", saveCurrentText);
-fileInput.addEventListener("change", loadSelectedFile);
 
 loadStats().catch(() => {
   stats.textContent = "Index unavailable";
@@ -157,3 +136,8 @@ loadStats().catch(() => {
 
 loadSplitRatio();
 renderMatches([]);
+
+window.alreadySaidApp = {
+  getDraftText,
+  setDraftText,
+};

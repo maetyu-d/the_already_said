@@ -8,6 +8,7 @@ from pathlib import Path
 
 import objc
 from AppKit import (
+    NSSavePanel,
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyRegular,
@@ -46,6 +47,7 @@ class AlreadySaidAppDelegate(NSObject):
         self.server = make_server(host="127.0.0.1", port=0)
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.window = None
+        self.webview = None
         return self
 
     def applicationDidFinishLaunching_(self, notification) -> None:
@@ -72,6 +74,7 @@ class AlreadySaidAppDelegate(NSObject):
         webview = WKWebView.alloc().initWithFrame_(frame)
         request = NSURLRequest.requestWithURL_(url)
         webview.loadRequest_(request)
+        self.webview = webview
         self.window.setContentView_(webview)
         self.window.makeKeyAndOrderFront_(None)
         self.window.makeFirstResponder_(webview)
@@ -84,6 +87,54 @@ class AlreadySaidAppDelegate(NSObject):
         self.server.shutdown()
         self.server.server_close()
 
+    def openDocument_(self, sender) -> None:
+        if self.webview is None:
+            return
+
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(True)
+        panel.setCanChooseDirectories_(False)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setAllowedFileTypes_(["txt"])
+        panel.setTitle_("Open text file")
+        panel.setMessage_("Choose a plain text file to load into the draft pane.")
+        response = panel.runModal()
+        if response != NSModalResponseOK:
+            return
+        url = panel.URL()
+        if url is None:
+            return
+
+        text = Path(str(url.path())).read_text(encoding="utf-8")
+        script = f"window.alreadySaidApp.setDraftText({json.dumps(text)});"
+        self.webview.evaluateJavaScript_completionHandler_(script, None)
+
+    def saveDocumentAs_(self, sender) -> None:
+        if self.webview is None:
+            return
+
+        panel = NSSavePanel.savePanel()
+        panel.setTitle_("Save draft")
+        panel.setNameFieldStringValue_("the-already-said.txt")
+        panel.setCanCreateDirectories_(True)
+        response = panel.runModal()
+        if response != NSModalResponseOK:
+            return
+        url = panel.URL()
+        if url is None:
+            return
+        destination = Path(str(url.path()))
+
+        def completion_handler(result, error) -> None:
+            if error is not None or result is None:
+                return
+            destination.write_text(str(result), encoding="utf-8")
+
+        self.webview.evaluateJavaScript_completionHandler_(
+            "window.alreadySaidApp.getDraftText();",
+            completion_handler,
+        )
+
 
 try:
     from Foundation import NSURLRequest
@@ -91,7 +142,7 @@ except ImportError:  # pragma: no cover
     NSURLRequest = None
 
 
-def build_menu() -> None:
+def build_menu(delegate: AlreadySaidAppDelegate) -> None:
     menubar = NSMenu.alloc().init()
 
     app_menu_item = NSMenuItem.alloc().init()
@@ -99,6 +150,15 @@ def build_menu() -> None:
     app_menu = NSMenu.alloc().initWithTitle_("The Already Said")
     app_menu.addItemWithTitle_action_keyEquivalent_("Quit The Already Said", "terminate:", "q")
     app_menu_item.setSubmenu_(app_menu)
+
+    file_menu_item = NSMenuItem.alloc().init()
+    menubar.addItem_(file_menu_item)
+    file_menu = NSMenu.alloc().initWithTitle_("File")
+    open_item = file_menu.addItemWithTitle_action_keyEquivalent_("Open...", "openDocument:", "o")
+    open_item.setTarget_(delegate)
+    save_item = file_menu.addItemWithTitle_action_keyEquivalent_("Save...", "saveDocumentAs:", "s")
+    save_item.setTarget_(delegate)
+    file_menu_item.setSubmenu_(file_menu)
 
     edit_menu_item = NSMenuItem.alloc().init()
     menubar.addItem_(edit_menu_item)
@@ -178,10 +238,10 @@ def ensure_external_db_path() -> Path | None:
 def main() -> None:
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
-    build_menu()
     delegate = AlreadySaidAppDelegate.alloc().init()
     if delegate is None:
         return
+    build_menu(delegate)
     app.setDelegate_(delegate)
     AppHelper.runEventLoop()
 
