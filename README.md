@@ -1,5 +1,8 @@
 # The Already Said
 
+<img width="3104" height="1838" alt="image" src="https://github.com/user-attachments/assets/edde632c-fe5d-4b67-9934-b77fa49aa52d" />
+
+
 A split-screen writing app inspired by the quiet focus of [iA Writer](https://ia.net/writer), but with a second pane that recomposes your draft entirely out of quotations found in a locally indexed Project Gutenberg corpus.
 
 ## What it does
