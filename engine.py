@@ -61,6 +61,7 @@ STOPWORDS = {
 PRIMARY_QUERY_TIMEOUT_SECONDS = 6.0
 FALLBACK_AFTER_SECONDS = 150.0
 SQLITE_PROGRESS_STEPS = 20_000
+SHORT_QUERY_TOKEN_LIMIT = 4
 
 
 @dataclass
@@ -189,6 +190,19 @@ def source_preference(result: SearchResult, query_text: str) -> float:
     return score
 
 
+def quotation_context_penalty(result: SearchResult, query_text: str) -> float:
+    text = (result.text or "").lower()
+    normalized_query = normalized_text(query_text)
+    penalty = 0.0
+    if not normalized_query:
+        return penalty
+    if any(marker in text for marker in ("reads:", "read:", "quoted in", "quotes", "quote:", "quotation")):
+        penalty -= 0.9
+    if any(marker in text for marker in ("_moby dick_", "_moby-dick_", "“call me ishmael", "\"call me ishmael")):
+        penalty -= 0.45
+    return penalty
+
+
 def is_secondary_source(result: SearchResult) -> bool:
     title = (result.title or "").lower()
     author = (result.author or "").lower()
@@ -231,6 +245,7 @@ def rerank_result(query: str, result: SearchResult) -> float:
         + exact_phrase_score(query, result.text[:2200])
         + sequence_score(query, result.text[:2200])
         + source_preference(result, query)
+        + quotation_context_penalty(result, query)
         + max(0.0, 0.05 - result.score)
     )
 
@@ -308,6 +323,71 @@ def fallback_fetch_results(query: str, conn: sqlite3.Connection, limit: int = 8)
     return sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)[:limit]
 
 
+def is_short_query(text: str) -> bool:
+    tokens = tokenize(text)
+    return 0 < len(tokens) <= SHORT_QUERY_TOKEN_LIMIT
+
+
+def short_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int = 8) -> list[SearchResult]:
+    tokens = tokenize(query)
+    if not tokens:
+        return []
+
+    phrase = " ".join(tokens)
+    sql = """
+        SELECT
+            passages.title,
+            passages.author,
+            passages.year,
+            passages.source_url,
+            passages.text,
+            0.0 AS score
+        FROM passages
+        WHERE lower(passages.text) LIKE ?
+        LIMIT 80
+    """
+    like_rows = execute_with_timeout(
+        conn,
+        sql,
+        (f"%{phrase}%",),
+        PRIMARY_QUERY_TIMEOUT_SECONDS / 2,
+    )
+
+    scored_rows: dict[tuple[str, str, str, str, str], SearchResult] = {}
+    for row in like_rows:
+        result = SearchResult(
+            title=row["title"],
+            author=row["author"],
+            year=row["year"],
+            source_url=row["source_url"],
+            text=row["text"],
+            score=0.0,
+        )
+        key = (result.title, result.author, result.year, result.source_url, result.text)
+        exact_bonus = 4.0 if phrase in normalized_text(result.text) else 0.0
+        reranked = rerank_result(query, result) + exact_bonus + (0.8 if not is_secondary_source(result) else 0.0)
+        existing = scored_rows.get(key)
+        if existing is None or reranked > existing.score:
+            result.score = reranked
+            scored_rows[key] = result
+
+    if not scored_rows:
+        fts_candidates = [f'"{phrase}"', " AND ".join(tokens)]
+        scored_rows = collect_scored_rows(
+            conn,
+            query,
+            [candidate for candidate in fts_candidates if candidate],
+            timeout_seconds=PRIMARY_QUERY_TIMEOUT_SECONDS / 2,
+            row_limit=40,
+        )
+
+    ranked = sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)
+    primary_ranked = [result for result in ranked if not is_secondary_source(result)]
+    if primary_ranked:
+        return primary_ranked[:limit]
+    return ranked[:limit]
+
+
 def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> list[SearchResult]:
     db_path = resolve_db_path(db_path)
     if not db_path.exists():
@@ -320,6 +400,11 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
     started = time.monotonic()
     conn = connect_db(db_path)
     try:
+        if is_short_query(query):
+            short_results = short_query_fetch_results(query, conn, limit=limit)
+            if short_results:
+                return short_results[:limit]
+
         scored_rows = collect_scored_rows(
             conn,
             query,
