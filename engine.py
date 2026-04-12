@@ -24,7 +24,7 @@ BUNDLED_DB_PATH = ROOT / "data" / "gutenberg.db"
 
 WORD_RE = re.compile(r"[a-zA-Z']+")
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
-INNER_QUOTE_RE = re.compile(r"[\"“]([^\"”]{24,})[\"”]")
+INNER_QUOTE_RE = re.compile(r"[\"“]([^\"”]{6,})[\"”]")
 LEADING_ARTIFACT_RE = re.compile(r"^[\]\[\d\s:;,.!?-]+")
 COMMENTARY_TITLE_HINTS = (
     "complete works",
@@ -187,6 +187,12 @@ def source_preference(result: SearchResult, query_text: str) -> float:
     if "/ebooks/" in source_url:
         score += 0.15
     return score
+
+
+def is_secondary_source(result: SearchResult) -> bool:
+    title = (result.title or "").lower()
+    author = (result.author or "").lower()
+    return any(hint in title for hint in COMMENTARY_TITLE_HINTS) or "[editor]" in author or "[translator]" in author
 
 
 def connect_db(db_path: Path) -> sqlite3.Connection:
@@ -406,25 +412,49 @@ def extract_inner_quote(text: str) -> str | None:
     return match.group(1).strip()
 
 
+def extract_refinement_query(segment: str, quote: str, result: SearchResult) -> str | None:
+    inner = extract_inner_quote(quote)
+    if inner:
+        return inner
+    if is_secondary_source(result):
+        normalized_segment = normalized_text(segment)
+        normalized_quote = normalized_text(quote)
+        if normalized_segment and normalized_quote and normalized_segment in normalized_quote:
+            return segment
+        quoted_phrases = re.findall(r"[\"“]([^\"”]{3,})[\"”]", quote)
+        if quoted_phrases:
+            return max(quoted_phrases, key=len).strip()
+        return segment
+    return None
+
+
 def refine_primary_source(segment: str, quote: str, result: SearchResult, db_path: Path | None) -> tuple[str, SearchResult]:
     db_path = resolve_db_path(db_path)
-    inner = extract_inner_quote(quote)
-    if not inner:
+    refinement_query = extract_refinement_query(segment, quote, result)
+    if not refinement_query:
         return quote, result
 
-    candidates = fetch_results(inner, limit=5, db_path=db_path)
+    candidates = fetch_results(refinement_query, limit=12, db_path=db_path)
     if not candidates:
         return quote, result
 
+    preferred_pool = [candidate for candidate in candidates if not is_secondary_source(candidate)]
+    if not preferred_pool:
+        preferred_pool = candidates
+
     preferred = sorted(
-        candidates,
+        preferred_pool,
         key=lambda candidate: (
-            sentence_score(inner, candidate.text[:2200]) + source_preference(candidate, inner),
+            (
+                sentence_score(refinement_query, candidate.text[:2200])
+                + exact_phrase_score(refinement_query, candidate.text[:2200])
+                + source_preference(candidate, refinement_query)
+            ),
             -len(candidate.title),
         ),
         reverse=True,
     )[0]
-    refined_quote = best_quote(inner, preferred)
+    refined_quote = best_quote(refinement_query, preferred)
     return refined_quote, preferred
 
 
