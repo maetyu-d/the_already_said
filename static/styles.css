@@ -1,14 +1,13 @@
 :root {
-  --paper: #f3f0ea;
-  --paper-strong: #ece7df;
-  --panel: rgba(250, 248, 244, 0.92);
-  --panel-alt: rgba(245, 242, 236, 0.95);
-  --ink: #121212;
-  --muted: #6a6a6a;
-  --accent: #0f0f0f;
-  --line: rgba(18, 18, 18, 0.14);
-  --line-strong: rgba(18, 18, 18, 0.28);
-  --shadow: 0 24px 80px rgba(18, 18, 18, 0.06);
+  --paper: #f6f4ef;
+  --panel: rgba(248, 246, 242, 0.96);
+  --panel-alt: rgba(242, 239, 233, 0.97);
+  --ink: #111111;
+  --muted: #686868;
+  --accent: #111111;
+  --line: rgba(17, 17, 17, 0.12);
+  --line-strong: rgba(17, 17, 17, 0.8);
+  --shadow: 0 14px 40px rgba(17, 17, 17, 0.05);
 }
 
 * {
@@ -20,24 +19,24 @@ body {
   margin: 0;
   min-height: 100%;
   background:
-    linear-gradient(90deg, rgba(18, 18, 18, 0.04) 0, rgba(18, 18, 18, 0.04) 1px, transparent 1px, transparent 64px),
-    linear-gradient(180deg, rgba(18, 18, 18, 0.035) 0, rgba(18, 18, 18, 0.035) 1px, transparent 1px, transparent 64px),
-    linear-gradient(180deg, #f7f5f1, #efebe4);
+    linear-gradient(90deg, rgba(17, 17, 17, 0.045) 0, rgba(17, 17, 17, 0.045) 1px, transparent 1px, transparent 72px),
+    linear-gradient(180deg, rgba(17, 17, 17, 0.03) 0, rgba(17, 17, 17, 0.03) 1px, transparent 1px, transparent 72px),
+    linear-gradient(180deg, #f8f6f2, #f0ede7);
   color: var(--ink);
-  font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-family: "Neue Haas Grotesk Text Pro", "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
 }
 
 body {
-  padding: 20px;
+  padding: 18px;
 }
 
 .shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
   gap: 0;
-  min-height: calc(100vh - 40px);
+  min-height: calc(100vh - 36px);
   border: 1px solid var(--line-strong);
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.45);
   box-shadow: var(--shadow);
 }
 
@@ -45,7 +44,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 28px 30px 30px;
+  padding: 24px 26px 28px;
   background: var(--panel);
 }
 
@@ -67,22 +66,22 @@ body {
 
 .panel-heading {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .eyebrow {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.69rem;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   color: var(--muted);
 }
 
 .panel-deck {
   margin: 0;
-  max-width: 28ch;
-  font-size: 0.88rem;
-  line-height: 1.45;
+  max-width: 24ch;
+  font-size: 0.8rem;
+  line-height: 1.5;
   color: var(--muted);
 }
 
@@ -96,16 +95,18 @@ p {
 h1,
 h2 {
   margin-bottom: 0;
-  font-size: clamp(1.6rem, 1.9vw, 2.05rem);
-  font-weight: 500;
-  letter-spacing: -0.03em;
+  font-size: clamp(1.55rem, 1.8vw, 1.95rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  text-transform: uppercase;
 }
 
 h3 {
   margin-bottom: 0;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   color: var(--muted);
 }
 
@@ -119,26 +120,30 @@ h3 {
 }
 
 .intro {
-  margin: 20px 0 22px;
-  max-width: 38ch;
-  line-height: 1.55;
-  color: #474747;
+  margin: 22px 0 18px;
+  max-width: 29ch;
+  line-height: 1.5;
+  font-size: 0.95rem;
+  color: #434343;
 }
 
 .style-picker {
   display: grid;
-  gap: 8px;
-  font-size: 0.72rem;
+  gap: 6px;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   color: var(--muted);
 }
 
 .style-picker select {
-  padding: 10px 12px;
+  padding: 10px 34px 10px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.9);
+  background:
+    linear-gradient(45deg, transparent 50%, var(--ink) 50%) calc(100% - 18px) calc(50% - 2px) / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--ink) 50%, transparent 50%) calc(100% - 13px) calc(50% - 2px) / 6px 6px no-repeat,
+    rgba(255, 255, 255, 0.94);
   color: var(--ink);
   font: inherit;
   min-width: 132px;
@@ -153,11 +158,12 @@ textarea {
   outline: none;
   background: transparent;
   color: var(--ink);
-  font: inherit;
-  font-size: clamp(1.18rem, 1.45vw, 1.5rem);
-  line-height: 1.72;
-  letter-spacing: -0.01em;
-  padding-top: 10px;
+  font-family: "Neue Haas Grotesk Text Pro", "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-size: clamp(1.12rem, 1.36vw, 1.42rem);
+  font-weight: 500;
+  line-height: 1.62;
+  letter-spacing: -0.02em;
+  padding-top: 14px;
 }
 
 .quotation-output,
@@ -166,44 +172,45 @@ textarea {
 }
 
 .quotation-output {
-  padding: 20px 0 12px;
+  padding: 18px 0 10px;
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
-  font-size: 1.06rem;
-  line-height: 1.8;
-  border-top: 1px solid var(--line);
+  font-size: 1rem;
+  line-height: 1.78;
+  border-top: 1px solid var(--line-strong);
 }
 
 .quotation-output p {
-  margin-bottom: 1.1rem;
+  margin-bottom: 1rem;
+  max-width: 38ch;
 }
 
 .quote-mark {
   color: var(--accent);
-  font-size: 1.25em;
+  font-size: 1.15em;
   line-height: 0;
-  vertical-align: -0.08em;
+  vertical-align: -0.05em;
 }
 
 .citation,
 .stats,
 .match-meta {
   color: var(--muted);
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
+  font-size: 0.67rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .stats {
   margin: 0;
-  max-width: 18ch;
+  max-width: 17ch;
   text-align: right;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .matches {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-strong);
   min-height: 0;
 }
 
@@ -214,24 +221,27 @@ textarea {
 }
 
 .match-card {
-  padding: 16px 0;
+  padding: 14px 0 12px;
   border-top: 1px solid var(--line);
   background: transparent;
 }
 
 .match-card h4 {
   margin: 0 0 8px;
-  font-size: 1rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
 }
 
 .match-card p {
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.45rem;
+  line-height: 1.48;
 }
 
 .match-card a {
   color: var(--accent);
+  font-size: 0.78rem;
   text-underline-offset: 0.18em;
   text-decoration-thickness: 1px;
 }
@@ -242,9 +252,9 @@ textarea {
 }
 
 .notes {
-  margin-top: 24px;
+  margin-top: 22px;
   padding-top: 14px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-strong);
 }
 
 sup {
@@ -253,7 +263,7 @@ sup {
 
 @media (max-width: 980px) {
   body {
-    padding: 16px;
+    padding: 14px;
   }
 
   .shell {
@@ -263,7 +273,7 @@ sup {
 
   .panel {
     min-height: 48vh;
-    padding: 22px;
+    padding: 20px;
   }
 
   .panel-editor {
