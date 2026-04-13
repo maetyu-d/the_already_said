@@ -8,16 +8,16 @@ On a practical level, a split-screen writing app inspired by the quiet focus of 
 
 On a philosophical level, The Already Said draws heavily on Barthes in how it shifts the author from originator to operator, and recasts writing as recombination rather than original creation. I first read Burrough and Gysin more than 25 years ago, but the combinations here are not cutups as much as algorithmic inevitability. Indeed, Ballard is a more appropriate point of reference as language is no longer expressive output, but a field of pre-indexed cultural material to be navigated. There are also echoes of Borges’ The Library of Babel in how expression becomes traversal through a finite textual space - it is almost inevitable that the archive already contains you. If the split-screen stages a tension between intentional writing and its archival double, the two may also converge, producing an (Freudian) uncanny authorship. Is the recomposed text less yours, or more so, precisely because it reveals its dependencies?
 
-## What it does
+## Finding your way around
 
 - Left side: a distraction-light writing surface.
 - Right side: a quotation-only rewrite assembled from your text by searching a local SQLite FTS5 index.
 - References: Harvard inline citations or Oxford-style notes.
 - Corpus: stored locally on disk, not in the browser. You could make your own corpus, but mine is available [here](https://drive.google.com/file/d/15Usb3kp0YjwDH4pTSqcf0m_FFDyU0TQv/view?usp=sharing) - approx. 50 gb!. 
 
-## Why this architecture
+## Why this architecture?
 
-The expensive part here is not the editor UI, it is searching a very large archive quickly. For that reason the project uses:
+The expensive part is not the editor UI, it is searching a very large archive quickly. Thus, the project uses:
 
 - Python's built-in `sqlite3` with FTS5 for fast local full-text search.
 - A small HTTP server for the UI and API.
@@ -26,7 +26,7 @@ The expensive part here is not the editor UI, it is searching a very large archi
 
 This is a better fit for a full local Gutenberg corpus than loading everything into client-side JavaScript.
 
-## Run it in the browser
+## To run it in the browser
 
 ```bash
 python3 scripts/build_index.py
@@ -35,7 +35,7 @@ python3 app.py
 
 Then open `http://127.0.0.1:8000`.
 
-## Run it as a desktop app
+## To run it as a desktop app
 
 ```bash
 python3 desktop_app.py
