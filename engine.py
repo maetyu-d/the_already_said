@@ -26,6 +26,7 @@ WORD_RE = re.compile(r"[a-zA-Z']+")
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
 INNER_QUOTE_RE = re.compile(r"[\"“]([^\"”]{6,})[\"”]")
 LEADING_ARTIFACT_RE = re.compile(r"^[\]\[\d\s:;,.!?-]+")
+LEADING_HEADING_RE = re.compile(r"^(?:[A-Z][A-Z' -]{3,}\s+){1,3}")
 COMMENTARY_TITLE_HINTS = (
     "complete works",
     "project gutenberg works",
@@ -146,6 +147,11 @@ def query_candidates(text: str) -> list[str]:
     if len(tokens) >= 2:
         queries.append(f'"{" ".join(tokens)}"')
     queries.extend(phrases)
+    if len(tokens) >= 5:
+        queries.append(f'"{" ".join(tokens[:5])}"')
+        queries.append(f'"{" ".join(tokens[-5:])}"')
+    if len(tokens) >= 6:
+        queries.append(f'"{" ".join(tokens[:3])}" AND "{" ".join(tokens[-3:])}"')
     if len(tokens) == 1:
         queries.append(tokens[0])
         queries.append(f"{tokens[0]}*")
@@ -181,12 +187,22 @@ def source_preference(result: SearchResult, query_text: str) -> float:
         score -= 0.35
     if len(title) < 36:
         score += 0.25
+    if re.search(r"\b(or,|volume|vol\.|complete|works)\b", title):
+        score -= 0.2
     if "\n" in result.title:
         score -= 0.25
     if normalized_text(query_text) in normalized_text(result.text):
         score += 2.5
     if "/ebooks/" in source_url:
         score += 0.15
+        match = re.search(r"/ebooks/(\d+)", source_url)
+        if match:
+            try:
+                ebook_id = int(match.group(1))
+            except ValueError:
+                ebook_id = 0
+            if ebook_id:
+                score += max(0.0, 0.35 - min(ebook_id, 50000) / 50000 * 0.35)
     return score
 
 
@@ -300,6 +316,8 @@ def fallback_keyword_candidates(text: str) -> list[str]:
     tokens = tokenize(text)
     keywords = keyword_candidates(text, max_terms=5)
     candidates: list[str] = []
+    if len(tokens) >= 2:
+        candidates.append(f'"{" ".join(tokens[: min(4, len(tokens))])}"')
     for token in keywords[:3]:
         candidates.append(token)
         candidates.append(f"{token}*")
@@ -487,6 +505,8 @@ def best_quote(segment: str, result: SearchResult) -> str:
 
 def clean_quote_text(text: str) -> str:
     cleaned = LEADING_ARTIFACT_RE.sub("", text).strip()
+    cleaned = LEADING_HEADING_RE.sub("", cleaned).strip()
+    cleaned = cleaned.replace("“ ", "“").replace('" ', '"')
     return cleaned
 
 
