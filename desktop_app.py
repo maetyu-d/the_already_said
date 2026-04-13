@@ -29,7 +29,7 @@ from AppKit import (
 )
 from Foundation import NSObject, NSURL
 from PyObjCTools import AppHelper
-from WebKit import WKWebView
+from WebKit import WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKWebView
 
 from app import make_server
 from engine import APP_SUPPORT_DIR, CONFIG_PATH, DEV_DB_PATH, ENV_DB_PATH
@@ -48,6 +48,7 @@ class AlreadySaidAppDelegate(NSObject):
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.window = None
         self.webview = None
+        self.navigation_delegate = None
         return self
 
     def applicationDidFinishLaunching_(self, notification) -> None:
@@ -72,6 +73,8 @@ class AlreadySaidAppDelegate(NSObject):
         self.window.setMinSize_(NSMakeSize(1100.0, 720.0))
 
         webview = WKWebView.alloc().initWithFrame_(frame)
+        self.navigation_delegate = ExportNavigationDelegate.alloc().initWithAppDelegate_(self)
+        webview.setNavigationDelegate_(self.navigation_delegate)
         request = NSURLRequest.requestWithURL_(url)
         webview.loadRequest_(request)
         self.webview = webview
@@ -135,6 +138,60 @@ class AlreadySaidAppDelegate(NSObject):
             completion_handler,
         )
 
+    def exportTypesetDocument_(self, sender=None) -> None:
+        if self.webview is None:
+            return
+
+        panel = NSSavePanel.savePanel()
+        panel.setTitle_("Export cited draft")
+        panel.setNameFieldStringValue_("the-already-said-typeset.html")
+        panel.setCanCreateDirectories_(True)
+        response = panel.runModal()
+        if response != NSModalResponseOK:
+            return
+        url = panel.URL()
+        if url is None:
+            return
+        destination = Path(str(url.path()))
+
+        def completion_handler(result, error) -> None:
+            if error is not None or result is None:
+                return
+            destination.write_text(str(result), encoding="utf-8")
+
+        self.webview.evaluateJavaScript_completionHandler_(
+            "window.alreadySaidApp.getTypesetHtml();",
+            completion_handler,
+        )
+
+
+class ExportNavigationDelegate(NSObject):
+    def initWithAppDelegate_(self, app_delegate):
+        self = objc.super(ExportNavigationDelegate, self).init()
+        if self is None:
+            return None
+        self.app_delegate = app_delegate
+        return self
+
+    def webView_decidePolicyForNavigationAction_decisionHandler_(self, webview, navigation_action, decision_handler):
+        request = navigation_action.request()
+        url = request.URL()
+        if url is not None and str(url.scheme()) == "alreadysaid-export":
+            self.app_delegate.exportTypesetDocument_(None)
+            decision_handler(WKNavigationActionPolicyCancel)
+            return
+        decision_handler(WKNavigationActionPolicyAllow)
+
+    def webView_didFinishNavigation_(self, webview, navigation):
+        script = (
+            "if (window.alreadySaidApp) {"
+            "window.alreadySaidApp.requestTypesetExport = function () {"
+            "window.location.href = 'alreadysaid-export://typeset';"
+            "};"
+            "}"
+        )
+        webview.evaluateJavaScript_completionHandler_(script, None)
+
 
 try:
     from Foundation import NSURLRequest
@@ -158,6 +215,8 @@ def build_menu(delegate: AlreadySaidAppDelegate) -> None:
     open_item.setTarget_(delegate)
     save_item = file_menu.addItemWithTitle_action_keyEquivalent_("Save...", "saveDocumentAs:", "s")
     save_item.setTarget_(delegate)
+    export_item = file_menu.addItemWithTitle_action_keyEquivalent_("Export Typeset...", "exportTypesetDocument:", "e")
+    export_item.setTarget_(delegate)
     file_menu_item.setSubmenu_(file_menu)
 
     edit_menu_item = NSMenuItem.alloc().init()

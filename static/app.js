@@ -180,10 +180,10 @@ function toggleViewMode() {
   setViewMode(!manuscriptMode);
 }
 
-function exportDocumentHtml() {
+function buildExportHtml() {
   const title = "The Already Said";
   const body = manuscriptOutput.innerHTML;
-  const html = `<!doctype html>
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -204,7 +204,10 @@ function exportDocumentHtml() {
   ${body}
 </body>
 </html>`;
+}
 
+function downloadExportHtml() {
+  const html = buildExportHtml();
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -214,6 +217,14 @@ function exportDocumentHtml() {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportDocumentHtml() {
+  if (window.alreadySaidApp?.requestTypesetExport) {
+    window.alreadySaidApp.requestTypesetExport();
+    return;
+  }
+  downloadExportHtml();
 }
 
 function handleTabToggle(event) {
@@ -294,5 +305,7 @@ renderManuscript(currentPayload);
 
 window.alreadySaidApp = {
   getDraftText,
+  getTypesetHtml: buildExportHtml,
+  requestTypesetExport: null,
   setDraftText,
 };
