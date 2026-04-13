@@ -63,6 +63,10 @@ COMMENTARY_TITLE_HINTS = (
     "review",
     "journal",
     "weekly",
+    "medical",
+    "investigation",
+    "architecture",
+    "century",
 )
 STOPWORDS = {
     "about", "after", "again", "against", "almost", "also", "among", "because", "been", "before",
@@ -164,14 +168,22 @@ def recovery_phrase_queries(text: str) -> list[str]:
     if len(tokens) < 5:
         return []
 
-    windows: list[list[str]] = []
-    windows.append(tokens[: min(7, len(tokens))])
-    windows.append(tokens[-min(7, len(tokens)) :])
-    if len(tokens) > 10:
-        middle_start = max(0, (len(tokens) // 2) - 3)
-        windows.append(tokens[middle_start : middle_start + 7])
-
     phrases: list[str] = []
+    clause_chunks = re.split(r"[,:;.!?]+", text)
+    for chunk in clause_chunks:
+        clause_tokens = tokenize(chunk)
+        if 4 <= len(clause_tokens) <= 9:
+            phrase = " ".join(clause_tokens).strip()
+            if phrase and phrase not in phrases:
+                phrases.append(phrase)
+
+    windows: list[list[str]] = []
+    windows.append(tokens[: min(6, len(tokens))])
+    windows.append(tokens[-min(6, len(tokens)) :])
+    if len(tokens) > 10:
+        middle_start = max(0, (len(tokens) // 2) - 2)
+        windows.append(tokens[middle_start : middle_start + 6])
+
     for window in windows:
         phrase = " ".join(window).strip()
         if phrase and phrase not in phrases:
@@ -255,7 +267,7 @@ def source_preference(result: SearchResult, query_text: str) -> float:
             except ValueError:
                 ebook_id = 0
             if ebook_id:
-                score += max(0.0, 0.35 - min(ebook_id, 50000) / 50000 * 0.35)
+                score += max(0.0, 1.2 - min(ebook_id, 50000) / 50000 * 1.2)
     return score
 
 
@@ -481,6 +493,143 @@ def short_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int =
     return ranked[:limit]
 
 
+def long_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int = 8) -> list[SearchResult]:
+    phrases = recovery_phrase_queries(query)
+    if not phrases:
+        return []
+
+    source_best: dict[str, SearchResult] = {}
+    source_totals: dict[str, float] = {}
+    source_hits: dict[str, int] = {}
+
+    def accumulate(candidate: SearchResult, bonus: float) -> None:
+        source_key = candidate.source_url or f"{candidate.title}|{candidate.author}"
+        score = rerank_result(query, candidate) + bonus
+        if not is_secondary_source(candidate):
+            score += 1.0
+        source_totals[source_key] = source_totals.get(source_key, 0.0) + score
+        source_hits[source_key] = source_hits.get(source_key, 0) + 1
+        existing = source_best.get(source_key)
+        if existing is None or score > existing.score:
+            candidate.score = score
+            source_best[source_key] = candidate
+
+    for phrase in phrases:
+        fts_rows = execute_with_timeout(
+            conn,
+            """
+            SELECT
+                passages.title,
+                passages.author,
+                passages.year,
+                passages.source_url,
+                passages.text,
+                0.0 AS score
+            FROM passages_fts
+            JOIN passages ON passages_fts.rowid = passages.id
+            WHERE passages_fts MATCH ?
+            LIMIT 40
+            """,
+            (f'"{phrase}"',),
+            PRIMARY_QUERY_TIMEOUT_SECONDS / 3,
+        )
+        for row in fts_rows:
+            candidate = SearchResult(
+                title=row["title"],
+                author=row["author"],
+                year=row["year"],
+                source_url=row["source_url"],
+                text=row["text"],
+                score=row["score"],
+            )
+            accumulate(candidate, 2.8 + exact_phrase_score(phrase, candidate.text[:2200]))
+
+    if len(phrases) >= 2:
+        conjunction = f'"{phrases[0]}" AND "{phrases[-1]}"'
+        fts_rows = execute_with_timeout(
+            conn,
+            """
+            SELECT
+                passages.title,
+                passages.author,
+                passages.year,
+                passages.source_url,
+                passages.text,
+                0.0 AS score
+            FROM passages_fts
+            JOIN passages ON passages_fts.rowid = passages.id
+            WHERE passages_fts MATCH ?
+            LIMIT 40
+            """,
+            (conjunction,),
+            PRIMARY_QUERY_TIMEOUT_SECONDS / 3,
+        )
+        for row in fts_rows:
+            candidate = SearchResult(
+                title=row["title"],
+                author=row["author"],
+                year=row["year"],
+                source_url=row["source_url"],
+                text=row["text"],
+                score=row["score"],
+            )
+            accumulate(candidate, 5.0)
+
+    scored_rows: dict[tuple[str, str, str, str, str], SearchResult] = {}
+    for source_key, candidate in source_best.items():
+        candidate.score = source_totals[source_key] + min(source_hits[source_key], 3) * 1.6
+        key = (candidate.title, candidate.author, candidate.year, candidate.source_url, candidate.text)
+        existing = scored_rows.get(key)
+        if existing is None or candidate.score > existing.score:
+            scored_rows[key] = candidate
+
+    if not scored_rows:
+        for phrase in phrases:
+            like_rows = execute_with_timeout(
+                conn,
+                """
+                SELECT
+                    passages.title,
+                    passages.author,
+                    passages.year,
+                    passages.source_url,
+                    passages.text,
+                    0.0 AS score
+                FROM passages
+                WHERE lower(passages.text) LIKE ?
+                LIMIT 120
+                """,
+                (token_like_pattern(phrase),),
+                PRIMARY_QUERY_TIMEOUT_SECONDS / 3,
+            )
+            for row in like_rows:
+                result = SearchResult(
+                    title=row["title"],
+                    author=row["author"],
+                    year=row["year"],
+                    source_url=row["source_url"],
+                    text=row["text"],
+                    score=0.0,
+                )
+                key = (result.title, result.author, result.year, result.source_url, result.text)
+                exact_bonus = 4.5 if normalized_text(phrase) in normalized_text(result.text) else 0.0
+                reranked = (
+                    rerank_result(query, result)
+                    + exact_bonus
+                    + (1.2 if not is_secondary_source(result) else 0.0)
+                )
+                existing = scored_rows.get(key)
+                if existing is None or reranked > existing.score:
+                    result.score = reranked
+                    scored_rows[key] = result
+
+    ranked = sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)
+    primary_ranked = [result for result in ranked if not is_secondary_source(result)]
+    if primary_ranked:
+        return primary_ranked[:limit]
+    return ranked[:limit]
+
+
 @lru_cache(maxsize=1024)
 def fetch_results_cached(query: str, limit: int, db_path_str: str) -> tuple[tuple[str, str, str, str, str, float], ...]:
     db_path = Path(db_path_str)
@@ -503,6 +652,14 @@ def fetch_results_cached(query: str, limit: int, db_path_str: str) -> tuple[tupl
                 )
 
         token_count = len(tokenize(query))
+        if token_count >= LONG_QUERY_TOKEN_THRESHOLD:
+            long_results = long_query_fetch_results(query, conn, limit=limit)
+            if long_results:
+                return tuple(
+                    (result.title, result.author, result.year, result.source_url, result.text, result.score)
+                    for result in long_results[:limit]
+                )
+
         row_limit = 8 if token_count >= LONG_QUERY_TOKEN_THRESHOLD else 12
         primary_timeout = 3.0 if token_count >= LONG_QUERY_TOKEN_THRESHOLD else PRIMARY_QUERY_TIMEOUT_SECONDS
         scored_rows = collect_scored_rows(
@@ -661,6 +818,9 @@ def recover_primary_match(segment: str, result: SearchResult, db_path: Path | No
 
     best_candidate = result
     best_score = rerank_result(segment, result)
+    source_best: dict[str, SearchResult] = {}
+    source_totals: dict[str, float] = {}
+    source_hits: dict[str, int] = {}
     db_path = resolve_db_path(db_path)
     conn = connect_db(db_path)
     try:
@@ -698,6 +858,13 @@ def recover_primary_match(segment: str, result: SearchResult, db_path: Path | No
                     + exact_phrase_score(segment, candidate.text[:2200])
                     + 1.5
                 )
+                source_key = candidate.source_url or f"{candidate.title}|{candidate.author}"
+                source_totals[source_key] = source_totals.get(source_key, 0.0) + score
+                source_hits[source_key] = source_hits.get(source_key, 0) + 1
+                existing_for_source = source_best.get(source_key)
+                if existing_for_source is None or score > existing_for_source.score:
+                    candidate.score = score
+                    source_best[source_key] = candidate
                 if score > best_score:
                     candidate.score = score
                     best_candidate = candidate
@@ -713,12 +880,34 @@ def recover_primary_match(segment: str, result: SearchResult, db_path: Path | No
                     + exact_phrase_score(segment, candidate.text[:2200])
                     + 1.0
                 )
+                source_key = candidate.source_url or f"{candidate.title}|{candidate.author}"
+                source_totals[source_key] = source_totals.get(source_key, 0.0) + score
+                source_hits[source_key] = source_hits.get(source_key, 0) + 1
+                existing_for_source = source_best.get(source_key)
+                if existing_for_source is None or score > existing_for_source.score:
+                    candidate.score = score
+                    source_best[source_key] = candidate
                 if score > best_score:
                     candidate.score = score
                     best_candidate = candidate
                     best_score = score
     finally:
         conn.close()
+
+    if source_totals:
+        best_source_key = max(
+            source_totals,
+            key=lambda key: (
+                source_totals[key] + min(source_hits.get(key, 0), 3) * 1.4,
+                source_hits.get(key, 0),
+                -len(source_best[key].title),
+            ),
+        )
+        source_candidate = source_best[best_source_key]
+        source_candidate.score = source_totals[best_source_key] + min(source_hits.get(best_source_key, 0), 3) * 1.4
+        if source_candidate.score > best_score:
+            best_candidate = source_candidate
+
     return best_candidate
 
 
