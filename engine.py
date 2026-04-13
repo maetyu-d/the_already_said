@@ -50,6 +50,19 @@ COMMENTARY_TITLE_HINTS = (
     "collection",
     "miscellany",
     "needlecraft",
+    "copyright renewals",
+    "american thought",
+    "weaver of fantasy",
+    "biography",
+    "letters of",
+    "memoir",
+    "punchinello",
+    "volume",
+    "no.",
+    "magazine",
+    "review",
+    "journal",
+    "weekly",
 )
 STOPWORDS = {
     "about", "after", "again", "against", "almost", "also", "among", "because", "been", "before",
@@ -109,6 +122,13 @@ def normalized_text(text: str) -> str:
     return " ".join(tokenize(text))
 
 
+def token_like_pattern(text: str) -> str:
+    tokens = tokenize(text)
+    if not tokens:
+        return "%"
+    return "%" + "%".join(tokens) + "%"
+
+
 def keyword_candidates(text: str, max_terms: int = 8) -> list[str]:
     seen: list[str] = []
     for token in tokenize(text):
@@ -137,6 +157,26 @@ def phrase_candidates(text: str) -> list[str]:
         if phrases:
             break
     return [f'"{phrase}"' for phrase in phrases[:4]]
+
+
+def recovery_phrase_queries(text: str) -> list[str]:
+    tokens = tokenize(text)
+    if len(tokens) < 5:
+        return []
+
+    windows: list[list[str]] = []
+    windows.append(tokens[: min(7, len(tokens))])
+    windows.append(tokens[-min(7, len(tokens)) :])
+    if len(tokens) > 10:
+        middle_start = max(0, (len(tokens) // 2) - 3)
+        windows.append(tokens[middle_start : middle_start + 7])
+
+    phrases: list[str] = []
+    for window in windows:
+        phrase = " ".join(window).strip()
+        if phrase and phrase not in phrases:
+            phrases.append(phrase)
+    return phrases
 
 
 def query_candidates(text: str) -> list[str]:
@@ -196,6 +236,8 @@ def source_preference(result: SearchResult, query_text: str) -> float:
         score -= 1.75
     if "[editor]" in author or "[translator]" in author:
         score -= 0.35
+    if "various" in author:
+        score -= 0.9
     if len(title) < 36:
         score += 0.25
     if re.search(r"\b(or,|volume|vol\.|complete|works)\b", title):
@@ -225,7 +267,15 @@ def quotation_context_penalty(result: SearchResult, query_text: str) -> float:
         return penalty
     if any(marker in text for marker in ("reads:", "read:", "quoted in", "quotes", "quote:", "quotation")):
         penalty -= 0.9
-    if any(marker in text for marker in ("_moby dick_", "_moby-dick_", "“call me ishmael", "\"call me ishmael")):
+    if any(marker in text for marker in (
+        "_moby dick_",
+        "_moby-dick_",
+        "_a tale of two cities_",
+        "_pride and prejudice_",
+        "“call me ishmael",
+        "\"call me ishmael",
+        "it was the best of times",
+    )):
         penalty -= 0.45
     return penalty
 
@@ -392,7 +442,7 @@ def short_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int =
     like_rows = execute_with_timeout(
         conn,
         sql,
-        (f"%{phrase}%",),
+        (token_like_pattern(phrase),),
         PRIMARY_QUERY_TIMEOUT_SECONDS / 2,
     )
 
@@ -605,6 +655,73 @@ def refine_primary_source(segment: str, quote: str, result: SearchResult, db_pat
     return refined_quote, preferred
 
 
+def recover_primary_match(segment: str, result: SearchResult, db_path: Path | None) -> SearchResult:
+    if not is_secondary_source(result):
+        return result
+
+    best_candidate = result
+    best_score = rerank_result(segment, result)
+    db_path = resolve_db_path(db_path)
+    conn = connect_db(db_path)
+    try:
+        for phrase in recovery_phrase_queries(segment):
+            like_rows = execute_with_timeout(
+                conn,
+                """
+                SELECT
+                    passages.title,
+                    passages.author,
+                    passages.year,
+                    passages.source_url,
+                    passages.text,
+                    0.0 AS score
+                FROM passages
+                WHERE lower(passages.text) LIKE ?
+                LIMIT 80
+                """,
+                (token_like_pattern(phrase),),
+                PRIMARY_QUERY_TIMEOUT_SECONDS / 3,
+            )
+            for row in like_rows:
+                candidate = SearchResult(
+                    title=row["title"],
+                    author=row["author"],
+                    year=row["year"],
+                    source_url=row["source_url"],
+                    text=row["text"],
+                    score=0.0,
+                )
+                if is_secondary_source(candidate):
+                    continue
+                score = (
+                    rerank_result(segment, candidate)
+                    + exact_phrase_score(segment, candidate.text[:2200])
+                    + 1.5
+                )
+                if score > best_score:
+                    candidate.score = score
+                    best_candidate = candidate
+                    best_score = score
+
+        for phrase in recovery_phrase_queries(segment):
+            candidates = fetch_results(phrase, limit=8, db_path=db_path)
+            for candidate in candidates:
+                if is_secondary_source(candidate):
+                    continue
+                score = (
+                    rerank_result(segment, candidate)
+                    + exact_phrase_score(segment, candidate.text[:2200])
+                    + 1.0
+                )
+                if score > best_score:
+                    candidate.score = score
+                    best_candidate = candidate
+                    best_score = score
+    finally:
+        conn.close()
+    return best_candidate
+
+
 def harvard_citation(result: SearchResult) -> str:
     author = result.author or "Unknown author"
     year = result.year or "n.d."
@@ -643,6 +760,7 @@ def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -
             )
             continue
 
+        result = recover_primary_match(segment, result, db_path)
         quote = best_quote(segment, result)
         quote, result = refine_primary_source(segment, quote, result, db_path)
         if style == "oxford":
