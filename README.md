@@ -1,11 +1,12 @@
 # The Already Said
 
-A split-screen writing app inspired by the quiet focus of [iA Writer](https://ia.net/writer), but where a second pane attempts to (re)compose your text entirely out of quotations found in a locally indexed Project Gutenberg corpus. A third, full screen view enables a typeset version of the result to be exported.
+On a practical level, a split-screen writing app inspired by the quiet focus of [iA Writer](https://ia.net/writer), but where a second pane attempts to (re)compose your text entirely out of quotations found in a locally indexed Project Gutenberg corpus. A third, full screen view enables a typeset version of the result to be exported.
 
 <img width="1552" height="919" alt="Screenshot 2026-04-13 at 20 57 09" src="https://github.com/user-attachments/assets/7e6e80b9-dd59-4dee-9dd1-819ba408f170" />
 
 <img width="1552" height="919" alt="Screenshot 2026-04-13 at 20 57 14" src="https://github.com/user-attachments/assets/1b649e3a-02c7-4208-bb08-6a1827f97835" />
 
+On a philosophical level, The Already Said draws heavily on Barthes in how it shifts the author from originator to operator, and recasts writing as recombination rather than original creation. I first read Burrough and Gysin more than 25 years ago, but the combinations here are not cutups as much as algorithmic inevitability. Indeed, Ballard is a more appropriate point of reference as language is no longer expressive output, but a field of pre-indexed cultural material to be navigated. There are also echoes of Borges’ The Library of Babel in how expression becomes traversal through a finite textual space - it is almost inevitable that the archive already contains you. If the split-screen stages a tension between intentional writing and its archival double, the two may also converge, producing an (Freudian) uncanny authorship. Is the recomposed text less yours, or, because it reveals its dependencies?
 
 ## What it does
 
