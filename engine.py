@@ -8,6 +8,7 @@ import sys
 import time
 from difflib import SequenceMatcher
 from dataclasses import dataclass
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 
@@ -63,6 +64,8 @@ PRIMARY_QUERY_TIMEOUT_SECONDS = 6.0
 FALLBACK_AFTER_SECONDS = 150.0
 SQLITE_PROGRESS_STEPS = 20_000
 SHORT_QUERY_TOKEN_LIMIT = 4
+LONG_QUERY_TOKEN_THRESHOLD = 10
+LONG_QUERY_WINDOW = 5
 
 
 @dataclass
@@ -144,7 +147,8 @@ def query_candidates(text: str) -> list[str]:
         return []
 
     queries: list[str] = []
-    if len(tokens) >= 2:
+    is_long_query = len(tokens) >= LONG_QUERY_TOKEN_THRESHOLD
+    if len(tokens) >= 2 and not is_long_query:
         queries.append(f'"{" ".join(tokens)}"')
     queries.extend(phrases)
     if len(tokens) >= 5:
@@ -152,6 +156,13 @@ def query_candidates(text: str) -> list[str]:
         queries.append(f'"{" ".join(tokens[-5:])}"')
     if len(tokens) >= 6:
         queries.append(f'"{" ".join(tokens[:3])}" AND "{" ".join(tokens[-3:])}"')
+    if is_long_query:
+        middle_start = max(0, (len(tokens) // 2) - (LONG_QUERY_WINDOW // 2))
+        middle = tokens[middle_start : middle_start + LONG_QUERY_WINDOW]
+        if len(middle) >= 3:
+            queries.append(f'"{" ".join(middle)}"')
+        if keywords:
+            queries.append(" AND ".join(keywords[: min(3, len(keywords))]))
     if len(tokens) == 1:
         queries.append(tokens[0])
         queries.append(f"{tokens[0]}*")
@@ -231,6 +242,20 @@ def connect_db(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA mmap_size=268435456")
     return conn
+
+
+def thaw_result_rows(rows: tuple[tuple[str, str, str, str, str, float], ...]) -> list[SearchResult]:
+    return [
+        SearchResult(
+            title=title,
+            author=author,
+            year=year,
+            source_url=source_url,
+            text=text,
+            score=score,
+        )
+        for title, author, year, source_url, text, score in rows
+    ]
 
 
 def execute_with_timeout(
@@ -406,14 +431,15 @@ def short_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int =
     return ranked[:limit]
 
 
-def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> list[SearchResult]:
-    db_path = resolve_db_path(db_path)
+@lru_cache(maxsize=1024)
+def fetch_results_cached(query: str, limit: int, db_path_str: str) -> tuple[tuple[str, str, str, str, str, float], ...]:
+    db_path = Path(db_path_str)
     if not db_path.exists():
-        return []
+        return ()
 
     candidates = query_candidates(query)
     if not candidates:
-        return []
+        return ()
 
     started = time.monotonic()
     conn = connect_db(db_path)
@@ -421,14 +447,20 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
         if is_short_query(query):
             short_results = short_query_fetch_results(query, conn, limit=limit)
             if short_results:
-                return short_results[:limit]
+                return tuple(
+                    (result.title, result.author, result.year, result.source_url, result.text, result.score)
+                    for result in short_results[:limit]
+                )
 
+        token_count = len(tokenize(query))
+        row_limit = 8 if token_count >= LONG_QUERY_TOKEN_THRESHOLD else 12
+        primary_timeout = 3.0 if token_count >= LONG_QUERY_TOKEN_THRESHOLD else PRIMARY_QUERY_TIMEOUT_SECONDS
         scored_rows = collect_scored_rows(
             conn,
             query,
             candidates[:3],
-            timeout_seconds=PRIMARY_QUERY_TIMEOUT_SECONDS,
-            row_limit=12,
+            timeout_seconds=primary_timeout,
+            row_limit=row_limit,
         )
         if not scored_rows or len(tokenize(query)) <= 3 or (time.monotonic() - started) >= FALLBACK_AFTER_SECONDS:
             fallback_results = fallback_fetch_results(query, conn, limit=limit)
@@ -440,7 +472,15 @@ def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> li
     finally:
         conn.close()
 
-    return sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)[:limit]
+    return tuple(
+        (result.title, result.author, result.year, result.source_url, result.text, result.score)
+        for result in sorted(scored_rows.values(), key=lambda item: item.score, reverse=True)[:limit]
+    )
+
+
+def fetch_results(query: str, limit: int = 8, db_path: Path | None = None) -> list[SearchResult]:
+    db_path = resolve_db_path(db_path)
+    return thaw_result_rows(fetch_results_cached(query, limit, str(db_path)))
 
 
 def sentence_score(segment: str, candidate: str) -> float:
@@ -474,6 +514,8 @@ def sequence_score(segment: str, candidate: str) -> float:
     normalized_segment = normalized_text(segment)
     normalized_candidate = normalized_text(candidate)
     if not normalized_segment or not normalized_candidate:
+        return 0.0
+    if len(normalized_segment.split()) >= LONG_QUERY_TOKEN_THRESHOLD:
         return 0.0
     return SequenceMatcher(None, normalized_segment, normalized_candidate).ratio()
 
