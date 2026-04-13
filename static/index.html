@@ -11,7 +11,6 @@
       <section class="panel panel-editor">
         <div class="panel-header">
           <div class="panel-heading">
-            <p class="eyebrow">TAS / 01</p>
             <h1>Draft input</h1>
           </div>
           <div class="controls">
@@ -25,7 +24,9 @@
           </div>
         </div>
         <div class="panel-rule" aria-hidden="true"></div>
-        <textarea id="editor" spellcheck="false" placeholder="Write."></textarea>
+        <div class="panel-body panel-body-editor">
+          <textarea id="editor" spellcheck="false" placeholder="Write."></textarea>
+        </div>
         <div class="panel-footer">
           <p class="footer-label">Local text field</p>
         </div>
@@ -36,21 +37,22 @@
       <section class="panel panel-archive">
         <div class="panel-header">
           <div class="panel-heading">
-            <p class="eyebrow">TAS / 02</p>
             <h2>Archive output</h2>
           </div>
           <p class="stats" id="stats">Index loading...</p>
         </div>
         <div class="panel-rule" aria-hidden="true"></div>
-        <article class="quotation-output" id="quotation-output">
-          <p class="empty">Start writing on the left. Quotations will gather here.</p>
-        </article>
-        <section class="matches">
-          <div class="matches-header">
-            <h3>Source Matches</h3>
-          </div>
-          <div id="matches-list" class="matches-list"></div>
-        </section>
+        <div class="panel-body panel-body-archive">
+          <article class="quotation-output" id="quotation-output">
+            <p class="empty">Start writing on the left. Quotations will gather here.</p>
+          </article>
+          <section class="matches">
+            <div class="matches-header">
+              <h3>Source Matches</h3>
+            </div>
+            <div id="matches-list" class="matches-list"></div>
+          </section>
+        </div>
         <div class="panel-footer">
           <p class="footer-label">Indexed local archive</p>
         </div>

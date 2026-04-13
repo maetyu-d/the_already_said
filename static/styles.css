@@ -43,6 +43,7 @@ body {
   min-height: 0;
   padding: 20px;
   background: var(--panel);
+  overflow: hidden;
 }
 
 .panel-editor {
@@ -99,14 +100,6 @@ body {
 .panel-heading {
   display: grid;
   gap: 2px;
-}
-
-.eyebrow {
-  margin: 0;
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.22em;
-  color: var(--muted);
 }
 
 h1,
@@ -173,8 +166,8 @@ h3 {
 }
 
 textarea {
-  flex: 1;
   width: 100%;
+  min-height: 100%;
   resize: none;
   border: 0;
   outline: none;
@@ -186,11 +179,22 @@ textarea {
   line-height: 1.48;
   letter-spacing: -0.016em;
   padding: 0;
+  overflow: auto;
 }
 
-.quotation-output,
-.matches-list {
+.panel-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-body-editor {
+  display: flex;
+  min-height: 0;
+}
+
+.panel-body-archive {
   overflow: auto;
+  padding-right: 2px;
 }
 
 .quotation-output {
@@ -198,6 +202,7 @@ textarea {
   font-family: "Helvetica Neue", "Univers", "Arial", sans-serif;
   font-size: 0.93rem;
   line-height: 1.5;
+  overflow: visible;
 }
 
 .quotation-output p {
@@ -239,6 +244,7 @@ textarea {
   display: grid;
   gap: 0;
   padding-top: 8px;
+  overflow: visible;
 }
 
 .match-card {

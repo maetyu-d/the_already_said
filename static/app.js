@@ -74,6 +74,18 @@ async function loadStats() {
   stats.textContent = `${books} books\n${passages} passages`;
 }
 
+function renderMatchReference(match, index) {
+  const author = escapeHtml(match.author || "Unknown author");
+  const year = escapeHtml(match.year || "n.d.");
+  const title = escapeHtml(match.title || "Untitled");
+
+  if (citationStyle.value === "oxford") {
+    return `${index + 1}. ${author}, <em>${title}</em> (${year}), Project Gutenberg.`;
+  }
+
+  return `${author}, ${year}, ${title}`;
+}
+
 function renderMatches(matches) {
   if (!matches.length) {
     matchesList.innerHTML = "<p class='empty'>Search matches will appear here as soon as the archive can answer your draft.</p>";
@@ -82,14 +94,14 @@ function renderMatches(matches) {
 
   matchesList.innerHTML = matches
     .map(
-      (match) => `
+      (match, index) => `
         <article class="match-card">
           <p class="match-meta">Your line</p>
           <p>${escapeHtml(match.input)}</p>
           <p class="match-meta">Found quotation</p>
           <p>"${escapeHtml(match.quote)}"</p>
           <h4>${escapeHtml(match.title)}</h4>
-          <p class="match-meta">${escapeHtml(match.author || "Unknown author")} · ${escapeHtml(match.year || "n.d.")}</p>
+          <p class="match-meta">${renderMatchReference(match, index)}</p>
           <p><a href="${escapeHtml(match.sourceUrl)}" target="_blank" rel="noreferrer">Project Gutenberg source</a></p>
         </article>
       `,

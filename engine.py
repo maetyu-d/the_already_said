@@ -732,9 +732,11 @@ def best_quote(segment: str, result: SearchResult) -> str:
     if not sentences:
         return result.text.strip()
 
+    segment_tokens = tokenize(segment)
+    short_query = len(segment_tokens) <= 6
     best_window_score = -1.0
     best_window_text = ""
-    max_window = min(3, len(sentences))
+    max_window = 1 if short_query else min(3, len(sentences))
     for window in range(1, max_window + 1):
         for start in range(0, len(sentences) - window + 1):
             passage = " ".join(sentence.strip() for sentence in sentences[start : start + window]).strip()
@@ -743,12 +745,19 @@ def best_quote(segment: str, result: SearchResult) -> str:
                 + exact_phrase_score(segment, passage)
                 + sequence_score(segment, passage)
             )
+            if short_query:
+                normalized_passage = normalized_text(passage)
+                normalized_segment = normalized_text(segment)
+                if normalized_segment and normalized_segment in normalized_passage:
+                    score += 3.5
+                score -= max(0, len(tokenize(passage)) - max(len(segment_tokens) * 3, 14)) * 0.06
             if score > best_window_score:
                 best_window_score = score
                 best_window_text = passage
 
     if best_window_score <= 0:
-        return sentences[0].strip()
+        fallback = sentences[0].strip()
+        return clean_quote_text(fallback)
     return clean_quote_text(best_window_text)
 
 
