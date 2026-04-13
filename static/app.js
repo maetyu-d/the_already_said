@@ -82,6 +82,15 @@ function paragraphChunks(text) {
     .filter(Boolean);
 }
 
+function normalizeForMatch(text) {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[“”"]/g, "\"")
+    .replace(/[’]/g, "'")
+    .trim();
+}
+
 async function loadStats() {
   const response = await fetch("/api/stats");
   const payload = await response.json();
@@ -139,14 +148,24 @@ function renderManuscript(payload) {
     const rebuilt = [];
 
     for (const segment of paragraphSegments) {
-      const currentMatch = matches[matchCursor];
-      if (currentMatch && currentMatch.input === segment) {
-        const citation = manuscriptInTextCitation(currentMatch, matchCursor);
+      const normalizedSegment = normalizeForMatch(segment);
+      let matchedIndex = -1;
+
+      for (let index = matchCursor; index < matches.length; index += 1) {
+        if (normalizeForMatch(matches[index].input) === normalizedSegment) {
+          matchedIndex = index;
+          break;
+        }
+      }
+
+      if (matchedIndex !== -1) {
+        const matched = matches[matchedIndex];
+        const citation = manuscriptInTextCitation(matched, matchedIndex);
         const citationHtml = citationStyle.value === "oxford"
           ? `<sup class="manuscript-citation">${citation}</sup>`
           : ` <span class="manuscript-citation">${escapeHtml(citation)}</span>`;
         rebuilt.push(`${escapeHtml(segment)}${citationHtml}`);
-        matchCursor += 1;
+        matchCursor = matchedIndex + 1;
       } else {
         rebuilt.push(escapeHtml(segment));
       }
