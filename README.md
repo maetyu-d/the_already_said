@@ -13,7 +13,7 @@ On a philosophical level, The Already Said draws heavily on Barthes in how it sh
 - Left side: a distraction-light writing surface.
 - Right side: a quotation-only rewrite assembled from your text by searching a local SQLite FTS5 index.
 - References: Harvard inline citations or Oxford-style notes.
-- Corpus: stored locally on disk, not in the browser. You could make your own corpus, but mine is available [here[(https://drive.google.com/file/d/15Usb3kp0YjwDH4pTSqcf0m_FFDyU0TQv/view?usp=sharing). 
+- Corpus: stored locally on disk, not in the browser. You could make your own corpus, but mine is available [here](https://drive.google.com/file/d/15Usb3kp0YjwDH4pTSqcf0m_FFDyU0TQv/view?usp=sharing). 
 
 ## Why this architecture
 
