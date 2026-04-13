@@ -285,6 +285,12 @@ textarea {
   white-space: nowrap;
 }
 
+.manuscript-composite-label {
+  color: var(--muted);
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+}
+
 .quote-mark {
   color: var(--accent);
   font-size: 0.95em;
@@ -340,6 +346,17 @@ textarea {
   margin-bottom: 0.28rem;
   line-height: 1.34;
   font-size: 0.75rem;
+}
+
+.match-badge {
+  display: inline-block;
+  margin: 0 0 0.45rem;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.52rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .match-card a {

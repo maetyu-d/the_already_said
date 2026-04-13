@@ -80,9 +80,12 @@ STOPWORDS = {
 PRIMARY_QUERY_TIMEOUT_SECONDS = 6.0
 FALLBACK_AFTER_SECONDS = 150.0
 SQLITE_PROGRESS_STEPS = 20_000
-SHORT_QUERY_TOKEN_LIMIT = 4
+SHORT_QUERY_TOKEN_LIMIT = 6
 LONG_QUERY_TOKEN_THRESHOLD = 10
 LONG_QUERY_WINDOW = 5
+COMPOSITE_MATCH_MIN_TOKENS = 8
+WEAK_MATCH_THRESHOLD = 2.8
+COMPONENT_MATCH_MIN_QUALITY = 3.1
 
 
 @dataclass
@@ -237,6 +240,49 @@ def query_candidates(text: str) -> list[str]:
 
 def split_sentences(text: str) -> list[str]:
     return [chunk.strip() for chunk in SENTENCE_RE.findall(text) if chunk.strip()]
+
+
+def clean_segment_piece(text: str) -> str:
+    cleaned = text.strip(" \t\n,;:-")
+    cleaned = re.sub(r"^(and|but|or|while|yet|because|although|though)\s+", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def clause_split_candidates(text: str) -> list[list[str]]:
+    candidates: list[list[str]] = []
+    punctuation_parts = [clean_segment_piece(part) for part in re.split(r"\s*[,;:]\s*", text) if clean_segment_piece(part)]
+    if 2 <= len(punctuation_parts) <= 3 and all(len(tokenize(part)) >= 3 for part in punctuation_parts):
+        candidates.append(punctuation_parts)
+
+    conjunction_matches = list(re.finditer(r"\b(and|but|or|while|yet|because|although|though)\b", text, re.IGNORECASE))
+    if conjunction_matches:
+        middle = len(text) / 2
+        pivot = min(conjunction_matches, key=lambda match: abs(match.start() - middle))
+        left = clean_segment_piece(text[:pivot.start()])
+        right = clean_segment_piece(text[pivot.end():])
+        if len(tokenize(left)) >= 3 and len(tokenize(right)) >= 3:
+            candidates.append([left, right])
+
+    if punctuation_parts and len(punctuation_parts) == 2:
+        longest_index = 0 if len(tokenize(punctuation_parts[0])) >= len(tokenize(punctuation_parts[1])) else 1
+        longest = punctuation_parts[longest_index]
+        conjunction_matches = list(re.finditer(r"\b(and|but|or|while|yet|because|although|though)\b", longest, re.IGNORECASE))
+        if conjunction_matches:
+            middle = len(longest) / 2
+            pivot = min(conjunction_matches, key=lambda match: abs(match.start() - middle))
+            first = clean_segment_piece(longest[:pivot.start()])
+            second = clean_segment_piece(longest[pivot.end():])
+            if len(tokenize(first)) >= 3 and len(tokenize(second)) >= 3:
+                expanded = punctuation_parts[:]
+                expanded[longest_index : longest_index + 1] = [first, second]
+                if 2 <= len(expanded) <= 3:
+                    candidates.append(expanded)
+
+    deduped: list[list[str]] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
 
 
 def source_preference(result: SearchResult, query_text: str) -> float:
@@ -768,6 +814,26 @@ def clean_quote_text(text: str) -> str:
     return cleaned
 
 
+def match_quality(segment: str, quote: str, result: SearchResult) -> float:
+    return (
+        sentence_score(segment, quote)
+        + exact_phrase_score(segment, quote)
+        + sequence_score(segment, quote)
+        + source_preference(result, segment)
+        + quotation_context_penalty(result, segment)
+    )
+
+
+def exact_clause_presence(segment: str, quote: str) -> bool:
+    normalized_segment = normalized_text(segment)
+    normalized_quote = normalized_text(quote)
+    if not normalized_segment or not normalized_quote:
+        return False
+    if normalized_segment in normalized_quote:
+        return True
+    return exact_phrase_score(segment, quote) > 0
+
+
 def extract_inner_quote(text: str) -> str | None:
     match = INNER_QUOTE_RE.search(text)
     if not match:
@@ -936,6 +1002,63 @@ def oxford_note(result: SearchResult, index: int) -> tuple[str, str]:
     return marker, note
 
 
+def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
+    result = next(iter(fetch_results(segment, limit=1, db_path=db_path)), None)
+    if result is None:
+        return None
+
+    result = recover_primary_match(segment, result, db_path)
+    quote = best_quote(segment, result)
+    quote, result = refine_primary_source(segment, quote, result, db_path)
+    quality = match_quality(segment, quote, result)
+    return {
+        "input": segment,
+        "quote": quote,
+        "title": result.title,
+        "author": result.author,
+        "year": result.year,
+        "sourceUrl": result.source_url,
+        "quality": quality,
+    }
+
+
+def resolve_segment_plan(segment: str, db_path: Path | None) -> dict | None:
+    primary = resolve_match_component(segment, db_path)
+    if primary is None:
+        return None
+
+    best_plan = {"input": segment, "components": [primary], "quality": primary["quality"]}
+    if len(tokenize(segment)) < COMPOSITE_MATCH_MIN_TOKENS or primary["quality"] >= WEAK_MATCH_THRESHOLD:
+        return best_plan
+
+    for candidate_parts in clause_split_candidates(segment):
+        components: list[dict] = []
+        for part in candidate_parts:
+            component = resolve_match_component(part, db_path)
+            if component is None:
+                components = []
+                break
+            exact_hit = exact_clause_presence(part, component["quote"])
+            requires_exact_hit = len(tokenize(part)) <= 6
+            if (
+                component["quality"] < COMPONENT_MATCH_MIN_QUALITY
+                or (requires_exact_hit and not exact_hit)
+            ):
+                components = []
+                break
+            components.append(component)
+
+        if len(components) < 2:
+            continue
+
+        average_quality = sum(component["quality"] for component in components) / len(components)
+        composite_quality = average_quality + min(len(components), 3) * 0.35
+        if composite_quality > best_plan["quality"] + 0.55:
+            best_plan = {"input": segment, "components": components, "quality": composite_quality}
+
+    return best_plan
+
+
 def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -> dict:
     db_path = resolve_db_path(db_path)
     segments = split_sentences(text)
@@ -951,37 +1074,59 @@ def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -
     notes: list[str] = []
 
     for segment in segments:
-        result = next(iter(fetch_results(segment, limit=1, db_path=db_path)), None)
-        if result is None:
+        plan = resolve_segment_plan(segment, db_path)
+        if plan is None:
             fragments.append(
                 "<p class='missing'>No quotation found for this passage yet. Index more texts to deepen the archive.</p>"
             )
             continue
 
-        result = recover_primary_match(segment, result, db_path)
-        quote = best_quote(segment, result)
-        quote, result = refine_primary_source(segment, quote, result, db_path)
-        if style == "oxford":
-            marker, note = oxford_note(result, len(notes) + 1)
-            citation_html = marker
-            notes.append(note)
-        else:
-            citation_html = f" <span class='citation'>{escape(harvard_citation(result))}</span>"
+        component_fragments: list[str] = []
+        stored_components: list[dict] = []
+        for component in plan["components"]:
+            result = SearchResult(
+                title=component["title"],
+                author=component["author"],
+                year=component["year"],
+                source_url=component["sourceUrl"],
+                text=component["quote"],
+                score=component["quality"],
+            )
+            if style == "oxford":
+                marker, note = oxford_note(result, len(notes) + 1)
+                citation_html = marker
+                notes.append(note)
+            else:
+                citation_html = f" <span class='citation'>{escape(harvard_citation(result))}</span>"
 
-        fragments.append(
-            "<p><span class='quote-mark'>&ldquo;</span>"
-            f"{escape(quote)}"
-            "<span class='quote-mark'>&rdquo;</span>"
-            f"{citation_html}</p>"
-        )
+            component_fragments.append(
+                "<span class='quote-mark'>&ldquo;</span>"
+                f"{escape(component['quote'])}"
+                "<span class='quote-mark'>&rdquo;</span>"
+                f"{citation_html}"
+            )
+            stored_components.append(
+                {
+                    "input": component["input"],
+                    "quote": component["quote"],
+                    "title": component["title"],
+                    "author": component["author"],
+                    "year": component["year"],
+                    "sourceUrl": component["sourceUrl"],
+                }
+            )
+
+        fragments.append(f"<p>{' '.join(component_fragments)}</p>")
         matches.append(
             {
                 "input": segment,
-                "quote": quote,
-                "title": result.title,
-                "author": result.author,
-                "year": result.year,
-                "sourceUrl": result.source_url,
+                "quote": " ".join(component["quote"] for component in stored_components),
+                "title": stored_components[0]["title"],
+                "author": stored_components[0]["author"],
+                "year": stored_components[0]["year"],
+                "sourceUrl": stored_components[0]["sourceUrl"],
+                "composite": len(stored_components) > 1,
+                "components": stored_components,
             }
         )
 

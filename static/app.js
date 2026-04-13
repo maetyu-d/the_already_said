@@ -111,6 +111,16 @@ function renderMatchReference(match, index) {
   return `${author}, ${year}, ${title}`;
 }
 
+function matchComponents(match) {
+  return match.components?.length ? match.components : [match];
+}
+
+function citationBaseIndex(matches, uptoIndex) {
+  return matches
+    .slice(0, uptoIndex)
+    .reduce((count, candidate) => count + matchComponents(candidate).length, 0);
+}
+
 function manuscriptInTextCitation(match, index) {
   const author = match.author || "Unknown author";
   const year = match.year || "n.d.";
@@ -160,11 +170,25 @@ function renderManuscript(payload) {
 
       if (matchedIndex !== -1) {
         const matched = matches[matchedIndex];
-        const citation = manuscriptInTextCitation(matched, matchedIndex);
-        const citationHtml = citationStyle.value === "oxford"
-          ? `<sup class="manuscript-citation">${citation}</sup>`
-          : ` <span class="manuscript-citation">${escapeHtml(citation)}</span>`;
-        rebuilt.push(`${escapeHtml(segment)}${citationHtml}`);
+        const components = matchComponents(matched);
+        if (components.length > 1) {
+          const baseIndex = citationBaseIndex(matches, matchedIndex);
+          const citations = components
+            .map((component, componentIndex) => {
+              const citation = manuscriptInTextCitation(component, baseIndex + componentIndex);
+              return citationStyle.value === "oxford"
+                ? `<sup class="manuscript-citation">${citation}</sup>`
+                : `<span class="manuscript-citation">${escapeHtml(citation)}</span>`;
+            })
+            .join(citationStyle.value === "oxford" ? "" : " ");
+          rebuilt.push(`${escapeHtml(segment)} ${citations} <span class="manuscript-composite-label">[recovered from multiple archive sources]</span>`);
+        } else {
+          const citation = manuscriptInTextCitation(matched, citationBaseIndex(matches, matchedIndex));
+          const citationHtml = citationStyle.value === "oxford"
+            ? `<sup class="manuscript-citation">${citation}</sup>`
+            : ` <span class="manuscript-citation">${escapeHtml(citation)}</span>`;
+          rebuilt.push(`${escapeHtml(segment)}${citationHtml}`);
+        }
         matchCursor = matchedIndex + 1;
       } else {
         rebuilt.push(escapeHtml(segment));
@@ -262,17 +286,23 @@ function renderMatches(matches) {
 
   matchesList.innerHTML = matches
     .map(
-      (match, index) => `
+      (match, index) => {
+        const baseIndex = citationBaseIndex(matches, index);
+        return `
         <article class="match-card">
           <p class="match-meta">Your line</p>
           <p>${escapeHtml(match.input)}</p>
-          <p class="match-meta">Found quotation</p>
-          <p>"${escapeHtml(match.quote)}"</p>
-          <h4>${escapeHtml(match.title)}</h4>
-          <p class="match-meta">${renderMatchReference(match, index)}</p>
-          <p><a href="${escapeHtml(match.sourceUrl)}" target="_blank" rel="noreferrer">Project Gutenberg source</a></p>
+          ${matchComponents(match).length > 1 ? `<p class="match-badge">Recovered from multiple archive sources</p>` : ""}
+          <p class="match-meta">${matchComponents(match).length > 1 ? "Recovered as parts" : "Found quotation"}</p>
+          ${matchComponents(match).map((component, componentIndex) => `
+            <p>"${escapeHtml(component.quote)}"</p>
+            <h4>${escapeHtml(component.title)}</h4>
+            <p class="match-meta">${renderMatchReference(component, baseIndex + componentIndex)}</p>
+            <p><a href="${escapeHtml(component.sourceUrl)}" target="_blank" rel="noreferrer">Project Gutenberg source</a></p>
+          `).join("")}
         </article>
-      `,
+      `;
+      },
     )
     .join("");
 }
