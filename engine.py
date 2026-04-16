@@ -22,6 +22,7 @@ APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "The Already
 CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
 DEV_DB_PATH = Path(__file__).resolve().parent / "data" / "gutenberg.db"
 BUNDLED_DB_PATH = ROOT / "data" / "gutenberg.db"
+TRANSLATION_VARIANTS_PATH = ROOT / "translation_variants.json"
 
 WORD_RE = re.compile(r"[a-zA-Z']+")
 SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
@@ -123,6 +124,19 @@ def resolve_db_path(db_path: Path | None = None) -> Path:
         return DEV_DB_PATH
 
     return BUNDLED_DB_PATH
+
+
+@lru_cache(maxsize=1)
+def load_translation_variants() -> dict[str, dict]:
+    if not TRANSLATION_VARIANTS_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(TRANSLATION_VARIANTS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
 
 def tokenize(text: str) -> list[str]:
@@ -1050,6 +1064,74 @@ def recover_primary_match(segment: str, result: SearchResult, db_path: Path | No
     return best_candidate
 
 
+def translation_variant_candidates(segment: str) -> list[tuple[str, dict]]:
+    normalized_segment = normalized_text(segment)
+    if not normalized_segment:
+        return []
+
+    candidates: list[tuple[str, dict]] = []
+    for entry in load_translation_variants().values():
+        variants = entry.get("variants", [])
+        if not isinstance(variants, list):
+            continue
+        for variant in variants:
+            if not isinstance(variant, str):
+                continue
+            normalized_variant = normalized_text(variant)
+            if not normalized_variant:
+                continue
+            similarity = SequenceMatcher(None, normalized_segment, normalized_variant).ratio()
+            token_overlap = len(set(tokenize(segment)) & set(tokenize(variant)))
+            if normalized_segment == normalized_variant:
+                candidates.append((variant, entry))
+            elif similarity >= 0.72 and token_overlap >= max(4, min(len(tokenize(segment)), len(tokenize(variant))) - 3):
+                candidates.append((variant, entry))
+    return candidates
+
+
+def translation_variant_fallback(segment: str, db_path: Path | None) -> dict | None:
+    variant_entries = translation_variant_candidates(segment)
+    if not variant_entries:
+        return None
+
+    best_component: dict | None = None
+    best_score = float("-inf")
+    preferred_title = ""
+    for variant_query, entry in variant_entries:
+        result = next(iter(fetch_results(variant_query, limit=1, db_path=db_path)), None)
+        if result is None:
+            continue
+
+        result = recover_primary_match(variant_query, result, db_path)
+        quote = best_quote(variant_query, result)
+        quote, result = refine_primary_source(variant_query, quote, result, db_path)
+        quality = match_quality(variant_query, quote, result)
+        exact_hit = exact_clause_presence(variant_query, quote)
+        expected_title = entry.get("expected_title") or ""
+        title_bonus = 0.8 if expected_title and result.title == expected_title else 0.0
+        total_score = quality + title_bonus
+        if total_score < MIN_ACCEPTABLE_MATCH_QUALITY and not exact_hit:
+            continue
+        if expected_title and result.title != expected_title:
+            continue
+        if total_score > best_score:
+            preferred_title = expected_title
+            best_score = total_score
+            best_component = {
+                "input": segment,
+                "quote": quote,
+                "title": result.title,
+                "author": result.author,
+                "year": result.year,
+                "sourceUrl": result.source_url,
+                "quality": total_score,
+                "matchedBy": "translation_variant",
+                "variantQuery": variant_query,
+                "expectedTitle": preferred_title,
+            }
+    return best_component
+
+
 def harvard_citation(result: SearchResult) -> str:
     author = result.author or "Unknown author"
     year = result.year or "n.d."
@@ -1068,11 +1150,11 @@ def oxford_note(result: SearchResult, index: int) -> tuple[str, str]:
 
 def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
     if not has_phrase_probe_hit(segment, db_path):
-        return None
+        return translation_variant_fallback(segment, db_path)
 
     result = next(iter(fetch_results(segment, limit=1, db_path=db_path)), None)
     if result is None:
-        return None
+        return translation_variant_fallback(segment, db_path)
 
     result = recover_primary_match(segment, result, db_path)
     quote = best_quote(segment, result)
@@ -1080,7 +1162,7 @@ def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
     quality = match_quality(segment, quote, result)
     exact_hit = exact_clause_presence(segment, quote)
     if quality < MIN_ACCEPTABLE_MATCH_QUALITY and not exact_hit:
-        return None
+        return translation_variant_fallback(segment, db_path)
     return {
         "input": segment,
         "quote": quote,

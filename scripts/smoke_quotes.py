@@ -21,7 +21,7 @@ CASES = [
     ("All happy families are alike; each unhappy family is unhappy in its own way.", "Anna Karenina"),
     ("It was a bright cold day in April, and the clocks were striking thirteen.", None),
     ("I am an invisible man.", None),
-    ("Happy families are all alike; every unhappy family is unhappy in its own way.", None),
+    ("Happy families are all alike; every unhappy family is unhappy in its own way.", "Anna Karenina"),
 ]
 
 

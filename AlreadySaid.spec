@@ -7,6 +7,7 @@ root = Path.cwd()
 
 datas = [
     (str(root / "static"), "static"),
+    (str(root / "translation_variants.json"), "."),
 ]
 
 hiddenimports = ["objc", "AppKit", "Foundation", "WebKit", "PyObjCTools"]
