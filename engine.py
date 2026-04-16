@@ -28,6 +28,7 @@ SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
 INNER_QUOTE_RE = re.compile(r"[\"“]([^\"”]{6,})[\"”]")
 LEADING_ARTIFACT_RE = re.compile(r"^[\]\[\d\s:;,.!?-]+")
 LEADING_HEADING_RE = re.compile(r"^(?:[A-Z][A-Z' -]{3,}\s+){1,3}")
+HEADING_PREFIX_RE = re.compile(r"^(?:[A-Z][A-Z' -]{2,}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,4})(?::|\s{2,})")
 COMMENTARY_TITLE_HINTS = (
     "complete works",
     "project gutenberg works",
@@ -86,6 +87,8 @@ LONG_QUERY_WINDOW = 5
 COMPOSITE_MATCH_MIN_TOKENS = 8
 WEAK_MATCH_THRESHOLD = 2.8
 COMPONENT_MATCH_MIN_QUALITY = 3.1
+MIN_ACCEPTABLE_MATCH_QUALITY = 3.6
+PHRASE_PROBE_TIMEOUT_SECONDS = 0.4
 
 
 @dataclass
@@ -181,11 +184,11 @@ def recovery_phrase_queries(text: str) -> list[str]:
                 phrases.append(phrase)
 
     windows: list[list[str]] = []
-    windows.append(tokens[: min(6, len(tokens))])
-    windows.append(tokens[-min(6, len(tokens)) :])
+    windows.append(tokens[: min(8, len(tokens))])
+    windows.append(tokens[-min(8, len(tokens)) :])
     if len(tokens) > 10:
-        middle_start = max(0, (len(tokens) // 2) - 2)
-        windows.append(tokens[middle_start : middle_start + 6])
+        middle_start = max(0, (len(tokens) // 2) - 3)
+        windows.append(tokens[middle_start : middle_start + 8])
 
     for window in windows:
         phrase = " ".join(window).strip()
@@ -676,6 +679,48 @@ def long_query_fetch_results(query: str, conn: sqlite3.Connection, limit: int = 
     return ranked[:limit]
 
 
+def has_phrase_probe_hit(query: str, db_path: Path | None) -> bool:
+    tokens = tokenize(query)
+    if len(tokens) < 6:
+        return True
+
+    db_path = resolve_db_path(db_path)
+    if not db_path.exists():
+        return False
+
+    probe_queries: list[str] = []
+    probe_queries.extend(f'"{phrase}"' for phrase in recovery_phrase_queries(query))
+    probe_queries.extend(phrase_candidates(query)[:2])
+
+    deduped: list[str] = []
+    for candidate in probe_queries:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+
+    if not deduped:
+        return True
+
+    conn = connect_db(db_path)
+    try:
+        for candidate in deduped[:4]:
+            rows = execute_with_timeout(
+                conn,
+                """
+                SELECT 1
+                FROM passages_fts
+                WHERE passages_fts MATCH ?
+                LIMIT 1
+                """,
+                (candidate,),
+                PHRASE_PROBE_TIMEOUT_SECONDS,
+            )
+            if rows:
+                return True
+    finally:
+        conn.close()
+    return False
+
+
 @lru_cache(maxsize=1024)
 def fetch_results_cached(query: str, limit: int, db_path_str: str) -> tuple[tuple[str, str, str, str, str, float], ...]:
     db_path = Path(db_path_str)
@@ -803,14 +848,28 @@ def best_quote(segment: str, result: SearchResult) -> str:
 
     if best_window_score <= 0:
         fallback = sentences[0].strip()
-        return clean_quote_text(fallback)
-    return clean_quote_text(best_window_text)
+        return trim_quote_to_segment_start(fallback, segment)
+    return trim_quote_to_segment_start(best_window_text, segment)
 
 
 def clean_quote_text(text: str) -> str:
     cleaned = LEADING_ARTIFACT_RE.sub("", text).strip()
     cleaned = LEADING_HEADING_RE.sub("", cleaned).strip()
+    cleaned = HEADING_PREFIX_RE.sub("", cleaned).strip()
     cleaned = cleaned.replace("“ ", "“").replace('" ', '"')
+    return cleaned
+
+
+def trim_quote_to_segment_start(text: str, segment: str) -> str:
+    cleaned = clean_quote_text(text)
+    tokens = tokenize(segment)[:5]
+    if not cleaned or len(tokens) < 3:
+        return cleaned
+
+    pattern = r"\b" + r"\W+".join(re.escape(token) for token in tokens) + r"\b"
+    match = re.search(pattern, cleaned, flags=re.IGNORECASE)
+    if match and 0 < match.start() < 240:
+        return cleaned[match.start():].strip()
     return cleaned
 
 
@@ -1003,6 +1062,9 @@ def oxford_note(result: SearchResult, index: int) -> tuple[str, str]:
 
 
 def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
+    if not has_phrase_probe_hit(segment, db_path):
+        return None
+
     result = next(iter(fetch_results(segment, limit=1, db_path=db_path)), None)
     if result is None:
         return None
@@ -1011,6 +1073,9 @@ def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
     quote = best_quote(segment, result)
     quote, result = refine_primary_source(segment, quote, result, db_path)
     quality = match_quality(segment, quote, result)
+    exact_hit = exact_clause_presence(segment, quote)
+    if quality < MIN_ACCEPTABLE_MATCH_QUALITY and not exact_hit:
+        return None
     return {
         "input": segment,
         "quote": quote,

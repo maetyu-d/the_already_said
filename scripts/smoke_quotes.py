@@ -19,6 +19,9 @@ CASES = [
     ("Marley was dead: to begin with.", "A Christmas Carol in Prose; Being a Ghost Story of Christmas"),
     ("It was the best of times, it was the worst of times.", "A Tale of Two Cities"),
     ("All happy families are alike; each unhappy family is unhappy in its own way.", "Anna Karenina"),
+    ("It was a bright cold day in April, and the clocks were striking thirteen.", None),
+    ("I am an invisible man.", None),
+    ("Happy families are all alike; every unhappy family is unhappy in its own way.", None),
 ]
 
 
@@ -38,7 +41,10 @@ def main() -> None:
                 "quote": match.get("quote"),
                 "sourceUrl": match.get("sourceUrl"),
                 "seconds": round(elapsed, 3),
-                "matched_expected": match.get("title") == expected_title,
+                "matched_expected": (match.get("title") == expected_title) if expected_title else None,
+                "found_match": bool(match),
+                "composite": bool(match.get("composite")),
+                "components": len(match.get("components", [])) if match else 0,
             }
         )
     print(json.dumps(report, indent=2))
