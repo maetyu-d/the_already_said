@@ -29,6 +29,7 @@ INNER_QUOTE_RE = re.compile(r"[\"“]([^\"”]{6,})[\"”]")
 LEADING_ARTIFACT_RE = re.compile(r"^[\]\[\d\s:;,.!?-]+")
 LEADING_HEADING_RE = re.compile(r"^(?:[A-Z][A-Z' -]{3,}\s+){1,3}")
 HEADING_PREFIX_RE = re.compile(r"^(?:[A-Z][A-Z' -]{2,}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,4})(?::|\s{2,})")
+TRIMMABLE_PREFIX_RE = re.compile(r"\b(stave|chapter|book|part|volume|period|ghost)\b", re.IGNORECASE)
 COMMENTARY_TITLE_HINTS = (
     "complete works",
     "project gutenberg works",
@@ -869,6 +870,10 @@ def trim_quote_to_segment_start(text: str, segment: str) -> str:
     pattern = r"\b" + r"\W+".join(re.escape(token) for token in tokens) + r"\b"
     match = re.search(pattern, cleaned, flags=re.IGNORECASE)
     if match and 0 < match.start() < 240:
+        prefix = cleaned[:match.start()].strip()
+        uppercase_prefix = prefix and sum(1 for char in prefix if char.isupper()) >= max(6, len(prefix) // 2)
+        if prefix and not (TRIMMABLE_PREFIX_RE.search(prefix) or uppercase_prefix or prefix.endswith(":")):
+            return cleaned
         return cleaned[match.start():].strip()
     return cleaned
 
