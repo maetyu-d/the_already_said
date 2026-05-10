@@ -12,6 +12,7 @@
         <div class="panel-header">
           <div class="panel-heading">
             <h1>Draft input</h1>
+            <p class="panel-kicker" id="draft-count">0 words</p>
           </div>
           <div class="controls">
             <label class="style-picker">
@@ -21,6 +22,32 @@
                 <option value="harvard">Harvard</option>
               </select>
             </label>
+            <div class="view-toggle" aria-label="View mode">
+              <button class="view-toggle-button is-active" id="draft-view-button" type="button">Draft</button>
+              <button class="view-toggle-button" id="manuscript-view-button" type="button">Manuscript</button>
+            </div>
+            <div class="tuning-controls" aria-label="Archive tuning">
+              <label class="style-picker">
+                <span>Lens</span>
+                <select id="match-mode">
+                  <option value="strict">Strict</option>
+                  <option value="associative" selected>Associative</option>
+                  <option value="uncanny">Uncanny</option>
+                </select>
+              </label>
+              <label class="tuning-slider">
+                <span>Confidence <strong id="confidence-value">3.6</strong></span>
+                <input id="min-confidence" type="range" min="1" max="8" step="0.1" value="3.6">
+              </label>
+              <label class="tuning-check">
+                <input id="allow-composite" type="checkbox" checked>
+                <span>Composite recovery</span>
+              </label>
+              <label class="tuning-check">
+                <input id="prefer-exact" type="checkbox">
+                <span>Prefer exact phrases</span>
+              </label>
+            </div>
           </div>
         </div>
         <div class="panel-rule" aria-hidden="true"></div>
@@ -28,7 +55,7 @@
           <textarea id="editor" spellcheck="false" placeholder="Write."></textarea>
         </div>
         <div class="panel-footer">
-          <p class="footer-label">Local text field</p>
+          <p class="footer-label" id="draft-save-status">Draft saved locally</p>
         </div>
       </section>
 
@@ -38,6 +65,7 @@
         <div class="panel-header">
           <div class="panel-heading">
             <h2>Archive output</h2>
+            <p class="panel-kicker" id="compose-status">Waiting for draft</p>
           </div>
           <p class="stats" id="stats">Index loading...</p>
         </div>
@@ -46,6 +74,20 @@
           <article class="quotation-output" id="quotation-output">
             <p class="empty">Start writing on the left. Quotations will gather here.</p>
           </article>
+          <section class="coverage">
+            <div class="matches-header">
+              <h3>Coverage</h3>
+            </div>
+            <div id="coverage-list" class="coverage-list"></div>
+          </section>
+          <section class="source-inspector">
+            <div class="matches-header">
+              <h3>Source Inspector</h3>
+            </div>
+            <article class="source-detail" id="source-detail">
+              <p class="empty">Select a source match to inspect how the archive found it.</p>
+            </article>
+          </section>
           <section class="matches">
             <div class="matches-header">
               <h3>Source Matches</h3>
@@ -54,7 +96,7 @@
           </section>
         </div>
         <div class="panel-footer">
-          <p class="footer-label">Indexed local archive</p>
+          <p class="footer-label" id="match-count">0 source matches</p>
         </div>
       </section>
 
@@ -62,8 +104,11 @@
         <div class="panel-header">
           <div class="panel-heading">
             <h2>Cited draft</h2>
+            <p class="panel-kicker" id="manuscript-count">0 references</p>
           </div>
           <div class="controls controls-manuscript">
+            <button class="export-button secondary" id="back-to-draft" type="button">Draft</button>
+            <button class="export-button secondary" id="copy-manuscript" type="button">Copy</button>
             <button class="export-button" id="export-manuscript" type="button">Export</button>
           </div>
         </div>

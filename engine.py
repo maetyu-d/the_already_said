@@ -91,6 +91,18 @@ WEAK_MATCH_THRESHOLD = 2.8
 COMPONENT_MATCH_MIN_QUALITY = 3.1
 MIN_ACCEPTABLE_MATCH_QUALITY = 3.6
 PHRASE_PROBE_TIMEOUT_SECONDS = 0.4
+MATCH_MODES = {"strict", "associative", "uncanny"}
+DEFAULT_MATCH_OPTIONS = {
+    "mode": "associative",
+    "allow_composite": True,
+    "min_confidence": MIN_ACCEPTABLE_MATCH_QUALITY,
+    "prefer_exact": False,
+}
+MODE_MIN_CONFIDENCE = {
+    "strict": 4.7,
+    "associative": MIN_ACCEPTABLE_MATCH_QUALITY,
+    "uncanny": 2.8,
+}
 
 
 @dataclass
@@ -101,6 +113,27 @@ class SearchResult:
     source_url: str
     text: str
     score: float
+
+
+def normalize_match_options(options: dict | None = None) -> dict:
+    options = options or {}
+    mode = options.get("mode", DEFAULT_MATCH_OPTIONS["mode"])
+    if mode not in MATCH_MODES:
+        mode = DEFAULT_MATCH_OPTIONS["mode"]
+
+    fallback_confidence = MODE_MIN_CONFIDENCE[mode]
+    try:
+        min_confidence = float(options.get("min_confidence", fallback_confidence))
+    except (TypeError, ValueError):
+        min_confidence = fallback_confidence
+
+    min_confidence = max(1.0, min(8.0, min_confidence))
+    return {
+        "mode": mode,
+        "allow_composite": bool(options.get("allow_composite", DEFAULT_MATCH_OPTIONS["allow_composite"])),
+        "min_confidence": min_confidence,
+        "prefer_exact": bool(options.get("prefer_exact", mode == "strict")),
+    }
 
 
 def resolve_db_path(db_path: Path | None = None) -> Path:
@@ -912,6 +945,65 @@ def exact_clause_presence(segment: str, quote: str) -> bool:
     return exact_phrase_score(segment, quote) > 0
 
 
+def shared_lens_terms(segment: str, quote: str, max_terms: int = 8) -> list[str]:
+    segment_terms = [
+        token for token in tokenize(segment)
+        if len(token) >= 4 and token not in STOPWORDS
+    ]
+    quote_terms = set(tokenize(quote))
+    shared: list[str] = []
+    for term in segment_terms:
+        if term in quote_terms and term not in shared:
+            shared.append(term)
+    return shared[:max_terms]
+
+
+def excerpt_around_quote(passage: str, quote: str, radius: int = 420) -> str:
+    passage = " ".join(passage.split())
+    quote = " ".join(quote.split())
+    if not passage:
+        return quote
+    if not quote:
+        return passage[: radius * 2].strip()
+
+    index = passage.lower().find(quote[:80].lower())
+    if index == -1:
+        return passage[: radius * 2].strip()
+
+    start = max(0, index - radius)
+    end = min(len(passage), index + len(quote) + radius)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(passage) else ""
+    return f"{prefix}{passage[start:end].strip()}{suffix}"
+
+
+def component_lens(segment: str, quote: str, result: SearchResult, quality: float, matched_by: str = "search") -> dict:
+    phrase_score = exact_phrase_score(segment, quote)
+    exact_hit = normalized_text(segment) in normalized_text(quote)
+    similarity = sequence_score(segment, quote)
+    shared_terms = shared_lens_terms(segment, quote)
+    if matched_by == "translation_variant":
+        match_type = "translation variant"
+    elif exact_hit:
+        match_type = "exact quotation"
+    elif phrase_score > 0:
+        match_type = "phrase recovery"
+    elif similarity >= 0.66:
+        match_type = "near echo"
+    else:
+        match_type = "associative echo"
+
+    return {
+        "matchType": match_type,
+        "quality": round(float(quality), 3),
+        "sharedTerms": shared_terms,
+        "exactPhrase": bool(phrase_score > 0),
+        "similarity": round(float(similarity), 3),
+        "sourceScore": round(float(result.score), 3),
+        "sourceExcerpt": excerpt_around_quote(result.text, quote),
+    }
+
+
 def extract_inner_quote(text: str) -> str | None:
     match = INNER_QUOTE_RE.search(text)
     if not match:
@@ -1089,7 +1181,8 @@ def translation_variant_candidates(segment: str) -> list[tuple[str, dict]]:
     return candidates
 
 
-def translation_variant_fallback(segment: str, db_path: Path | None) -> dict | None:
+def translation_variant_fallback(segment: str, db_path: Path | None, options: dict | None = None) -> dict | None:
+    options = normalize_match_options(options)
     variant_entries = translation_variant_candidates(segment)
     if not variant_entries:
         return None
@@ -1110,7 +1203,9 @@ def translation_variant_fallback(segment: str, db_path: Path | None) -> dict | N
         expected_title = entry.get("expected_title") or ""
         title_bonus = 0.8 if expected_title and result.title == expected_title else 0.0
         total_score = quality + title_bonus
-        if total_score < MIN_ACCEPTABLE_MATCH_QUALITY and not exact_hit:
+        if options["prefer_exact"] and not exact_hit:
+            continue
+        if total_score < options["min_confidence"] and not exact_hit:
             continue
         if expected_title and result.title != expected_title:
             continue
@@ -1126,6 +1221,7 @@ def translation_variant_fallback(segment: str, db_path: Path | None) -> dict | N
                 "sourceUrl": result.source_url,
                 "quality": total_score,
                 "matchedBy": "translation_variant",
+                "lens": component_lens(segment, quote, result, total_score, "translation_variant"),
                 "variantQuery": variant_query,
                 "expectedTitle": preferred_title,
             }
@@ -1148,21 +1244,16 @@ def oxford_note(result: SearchResult, index: int) -> tuple[str, str]:
     return marker, note
 
 
-def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
-    if not has_phrase_probe_hit(segment, db_path):
-        return translation_variant_fallback(segment, db_path)
-
-    result = next(iter(fetch_results(segment, limit=1, db_path=db_path)), None)
-    if result is None:
-        return translation_variant_fallback(segment, db_path)
-
+def component_from_result(segment: str, result: SearchResult, db_path: Path | None, options: dict) -> dict | None:
     result = recover_primary_match(segment, result, db_path)
     quote = best_quote(segment, result)
     quote, result = refine_primary_source(segment, quote, result, db_path)
     quality = match_quality(segment, quote, result)
     exact_hit = exact_clause_presence(segment, quote)
-    if quality < MIN_ACCEPTABLE_MATCH_QUALITY and not exact_hit:
-        return translation_variant_fallback(segment, db_path)
+    if options["prefer_exact"] and not exact_hit:
+        return translation_variant_fallback(segment, db_path, options)
+    if quality < options["min_confidence"] and not exact_hit:
+        return translation_variant_fallback(segment, db_path, options)
     return {
         "input": segment,
         "quote": quote,
@@ -1171,33 +1262,78 @@ def resolve_match_component(segment: str, db_path: Path | None) -> dict | None:
         "year": result.year,
         "sourceUrl": result.source_url,
         "quality": quality,
+        "matchedBy": "search",
+        "lens": component_lens(segment, quote, result, quality, "search"),
     }
 
 
-def resolve_segment_plan(segment: str, db_path: Path | None) -> dict | None:
-    primary = resolve_match_component(segment, db_path)
+def resolve_match_alternatives(segment: str, db_path: Path | None, options: dict | None = None, limit: int = 5) -> list[dict]:
+    options = normalize_match_options(options)
+    if not has_phrase_probe_hit(segment, db_path):
+        fallback = translation_variant_fallback(segment, db_path, options)
+        return [fallback] if fallback else []
+
+    alternatives: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for result in fetch_results(segment, limit=max(limit * 2, 8), db_path=db_path):
+        component = component_from_result(segment, result, db_path, options)
+        if component is None:
+            continue
+        key = (component["title"], component["author"], normalized_text(component["quote"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        alternatives.append(component)
+        if len(alternatives) >= limit:
+            break
+
+    if not alternatives:
+        fallback = translation_variant_fallback(segment, db_path, options)
+        if fallback:
+            alternatives.append(fallback)
+
+    return alternatives
+
+
+def resolve_match_component(segment: str, db_path: Path | None, options: dict | None = None) -> dict | None:
+    alternatives = resolve_match_alternatives(segment, db_path, options, limit=5)
+    if not alternatives:
+        return None
+    primary = alternatives[0]
+    primary["alternatives"] = alternatives[1:]
+    return primary
+
+
+def resolve_segment_plan(segment: str, db_path: Path | None, options: dict | None = None) -> dict | None:
+    options = normalize_match_options(options)
+    primary = resolve_match_component(segment, db_path, options)
     if primary is None:
         return None
 
     best_plan = {"input": segment, "components": [primary], "quality": primary["quality"]}
-    if len(tokenize(segment)) < COMPOSITE_MATCH_MIN_TOKENS or primary["quality"] >= WEAK_MATCH_THRESHOLD:
+    if (
+        not options["allow_composite"]
+        or len(tokenize(segment)) < COMPOSITE_MATCH_MIN_TOKENS
+    ):
         return best_plan
 
     for candidate_parts in clause_split_candidates(segment):
         components: list[dict] = []
-        for part in candidate_parts:
-            component = resolve_match_component(part, db_path)
+        for part_index, part in enumerate(candidate_parts):
+            component = resolve_match_component(part, db_path, options)
             if component is None:
                 components = []
                 break
             exact_hit = exact_clause_presence(part, component["quote"])
             requires_exact_hit = len(tokenize(part)) <= 6
             if (
-                component["quality"] < COMPONENT_MATCH_MIN_QUALITY
+                component["quality"] < max(COMPONENT_MATCH_MIN_QUALITY, options["min_confidence"] - 0.5)
                 or (requires_exact_hit and not exact_hit)
             ):
                 components = []
                 break
+            component["clauseIndex"] = part_index
+            component["clauseCount"] = len(candidate_parts)
             components.append(component)
 
         if len(components) < 2:
@@ -1206,30 +1342,43 @@ def resolve_segment_plan(segment: str, db_path: Path | None) -> dict | None:
         average_quality = sum(component["quality"] for component in components) / len(components)
         composite_quality = average_quality + min(len(components), 3) * 0.35
         if composite_quality > best_plan["quality"] + 0.55:
-            best_plan = {"input": segment, "components": components, "quality": composite_quality}
+            best_plan = {"input": segment, "components": components, "quality": composite_quality, "clauses": candidate_parts}
 
     return best_plan
 
 
-def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -> dict:
+def compose_quotation_text(text: str, style: str, db_path: Path | None = None, options: dict | None = None) -> dict:
     db_path = resolve_db_path(db_path)
-    segments = split_sentences(text)
-    if not segments:
+    match_options = normalize_match_options(options)
+    input_segments = split_sentences(text)
+    if not input_segments:
         return {
             "html": "<p class='empty'>Start writing on the left. Quotations will gather here.</p>",
             "matches": [],
+            "segments": [],
             "notes": [],
+            "options": match_options,
         }
 
     fragments: list[str] = []
     matches: list[dict] = []
+    segment_reports: list[dict] = []
     notes: list[str] = []
 
-    for segment in segments:
-        plan = resolve_segment_plan(segment, db_path)
+    for segment_index, segment in enumerate(input_segments):
+        plan = resolve_segment_plan(segment, db_path, match_options)
         if plan is None:
             fragments.append(
                 "<p class='missing'>No quotation found for this passage yet. Index more texts to deepen the archive.</p>"
+            )
+            segment_reports.append(
+                {
+                    "index": segment_index,
+                    "input": segment,
+                    "status": "missing",
+                    "components": [],
+                    "quality": 0.0,
+                }
             )
             continue
 
@@ -1265,20 +1414,49 @@ def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -
                     "author": component["author"],
                     "year": component["year"],
                     "sourceUrl": component["sourceUrl"],
+                    "quality": round(float(component["quality"]), 3),
+                    "matchedBy": component.get("matchedBy", "search"),
+                    "lens": component.get("lens", {}),
+                    "alternatives": [
+                        {
+                            "input": alternative["input"],
+                            "quote": alternative["quote"],
+                            "title": alternative["title"],
+                            "author": alternative["author"],
+                            "year": alternative["year"],
+                            "sourceUrl": alternative["sourceUrl"],
+                            "quality": round(float(alternative["quality"]), 3),
+                            "matchedBy": alternative.get("matchedBy", "search"),
+                            "lens": alternative.get("lens", {}),
+                        }
+                        for alternative in component.get("alternatives", [])
+                    ],
+                    "clauseIndex": component.get("clauseIndex"),
+                    "clauseCount": component.get("clauseCount"),
                 }
             )
 
         fragments.append(f"<p>{' '.join(component_fragments)}</p>")
-        matches.append(
+        match_report = {
+            "input": segment,
+            "quote": " ".join(component["quote"] for component in stored_components),
+            "title": stored_components[0]["title"],
+            "author": stored_components[0]["author"],
+            "year": stored_components[0]["year"],
+            "sourceUrl": stored_components[0]["sourceUrl"],
+            "composite": len(stored_components) > 1,
+            "clauses": plan.get("clauses", []),
+            "components": stored_components,
+            "quality": round(float(plan["quality"]), 3),
+        }
+        matches.append(match_report)
+        segment_reports.append(
             {
+                "index": segment_index,
                 "input": segment,
-                "quote": " ".join(component["quote"] for component in stored_components),
-                "title": stored_components[0]["title"],
-                "author": stored_components[0]["author"],
-                "year": stored_components[0]["year"],
-                "sourceUrl": stored_components[0]["sourceUrl"],
-                "composite": len(stored_components) > 1,
+                "status": "composite" if len(stored_components) > 1 else "matched",
                 "components": stored_components,
+                "quality": match_report["quality"],
             }
         )
 
@@ -1289,7 +1467,13 @@ def compose_quotation_text(text: str, style: str, db_path: Path | None = None) -
             + "</section>"
         )
 
-    return {"html": "".join(fragments), "matches": matches, "notes": notes}
+    return {
+        "html": "".join(fragments),
+        "matches": matches,
+        "segments": segment_reports,
+        "notes": notes,
+        "options": match_options,
+    }
 
 
 def compose_plaintext(text: str, style: str, db_path: Path | None = None) -> dict:

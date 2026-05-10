@@ -8,7 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from engine import compose_quotation_text, fetch_results, stats
+from engine import compose_quotation_text, fetch_results, normalize_match_options, stats
 
 
 if getattr(sys, "frozen", False):
@@ -16,6 +16,13 @@ if getattr(sys, "frozen", False):
 else:
     ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
+ALLOWED_CITATION_STYLES = {"harvard", "oxford"}
+
+
+def normalize_citation_style(value: object) -> str:
+    if isinstance(value, str) and value in ALLOWED_CITATION_STYLES:
+        return value
+    return "harvard"
 
 
 class GutenbergHandler(SimpleHTTPRequestHandler):
@@ -63,7 +70,11 @@ class GutenbergHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
 
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json({"error": "Invalid Content-Length"}, HTTPStatus.BAD_REQUEST)
+            return
         raw = self.rfile.read(length)
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -72,8 +83,12 @@ class GutenbergHandler(SimpleHTTPRequestHandler):
             return
 
         text = payload.get("text", "")
-        style = payload.get("style", "harvard")
-        self._send_json(compose_quotation_text(text, style))
+        if not isinstance(text, str):
+            self._send_json({"error": "text must be a string"}, HTTPStatus.BAD_REQUEST)
+            return
+        style = normalize_citation_style(payload.get("style", "harvard"))
+        options = normalize_match_options(payload.get("options") if isinstance(payload.get("options"), dict) else {})
+        self._send_json(compose_quotation_text(text, style, options=options))
 
     def log_message(self, format: str, *args) -> None:
         sys.stdout.write(f"{self.address_string()} - {format % args}\n")
